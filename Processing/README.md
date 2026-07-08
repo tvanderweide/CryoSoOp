@@ -64,17 +64,26 @@ drift between the two). Checklist:
      antenna phase center), `tower_h_m`, and `capture_tz`.
    - `season`: `start`/`end` dates, candidate NORAD ids, and the confirmed
      `norad` (see step 4).
-   - `weather` (optional): a local TOA5 `.dat` logger file and its
-     temperature column names for the viewer overlay.
-2. **Capture timezone** — `site.capture_tz` must be the IANA zone of the
-   acquisition computer's clock (e.g. `"America/Denver"`); verify the actual
-   setting on the Pi with `timedatectl`. Capture filenames use the local
-   clock, and this field is how `compute_L2` / `compare_sat_candidates`
-   convert them to UTC for matching against the elevation tables — MATLAB's
-   `datetime` handles daylight-saving transitions automatically once the
-   zone is correct. Caution: if it is wrong or missing, timestamps are
-   treated as already-UTC, which silently misaligns every satellite-geometry
-   product by the UTC offset.
+   - `weather` (optional): a local TOA5 `.dat` logger file, its temperature
+     column names for the viewer overlay, and `wx_tz` — the logger's clock
+     zone (Campbell loggers run fixed standard time year-round; Brundage is
+     UTC−7, i.e. `"Etc/GMT+7"` — note the POSIX sign convention: `Etc/GMT+7`
+     IS UTC−7). When set, weather timestamps are converted into the capture
+     timebase so the viewer overlay aligns; when absent, they pass through
+     unconverted (the legacy-season behavior).
+2. **Capture timezone** — `site.capture_tz` names the timebase of the
+   capture filename stamps. cryosoop builds from 2026-07 on stamp **UTC in
+   code** (independent of the Pi's OS timezone), so for new deployments set
+   `"UTC"` — `compute_L1` refuses to process UTC-marked runs (summary.json
+   `wall_clock: "UTC"`) under a local zone. For **legacy pre-UTC data** set
+   the IANA zone of the acquisition computer's clock at capture time (e.g.
+   `"America/Boise"`; the field is how `compute_L2` /
+   `compare_sat_candidates` convert to UTC for the elevation tables, with
+   daylight-saving transitions handled automatically). Never mix UTC-era and
+   legacy runs under one data root — the field applies to the whole tree.
+   Caution: if it is wrong or missing on legacy data, timestamps are treated
+   as already-UTC, which silently misaligns every satellite-geometry product
+   by the UTC offset.
 3. **Elevation tables** — regenerate with `tools/make_muos_elevation.py`
    (its `--lat/--lon/--alt/--start/--end/--norad` defaults come from
    `site_config.json`, so after step 1 no arguments are needed; CLI flags
@@ -127,9 +136,10 @@ before debugging a mismatch:
   legacy acquisition stdout log for log mode; it auto-detects which.
 - **Radio parameters are unchanged**: 370 MHz center, 20 MS/s, gain 54,
   `sc16` (interleaved I/Q int16), ch0 = A:A (direct), ch1 = A:B (reflected),
-  capture clock `America/Boise` local time. Nothing in the signal-processing
-  constants (`cfg.fs`, `cfg.Ti`, `cfg.peak_lag`, etc.) needs to change
-  between formats.
+  capture clock `America/Boise` local time for the legacy 2025-26 season
+  (cryosoop builds from 2026-07 on stamp UTC — see the timezone checklist
+  item above). Nothing in the signal-processing constants (`cfg.fs`,
+  `cfg.Ti`, `cfg.peak_lag`, etc.) needs to change between formats.
 
 ## Layout
 

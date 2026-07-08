@@ -44,7 +44,7 @@ Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
 | `cfg.site_lat` | `44.99908744` deg N | |
 | `cfg.site_lon` | `-116.133436` deg E | |
 | `cfg.site_alt_m` | `2247.113` m, WGS84 ellipsoidal | antenna phase center = surveyed ground point 2241.017 m + 6.096 m tower; <0.001 deg effect at GEO range |
-| `cfg.capture_tz` | `'America/Boise'` | Pi clock timezone — VERIFIED 2026-06-12 via `timedatectl` (Local MDT, RTC in UTC). Capture filenames use the LOCAL clock, so the season spans the Mar 8 MST->MDT change; `datetime` TimeZone conversion (used in compute_L2 / compare_sat_candidates) handles both offsets. If absent, timestamps are assumed already UTC |
+| `cfg.capture_tz` | `'America/Boise'` (legacy season) / `'UTC'` (UTC-era) | Timebase of the capture filename stamps. Legacy 2025-26 data used the Pi's LOCAL clock (`'America/Boise'`, VERIFIED 2026-06-12 via `timedatectl`; season spans the Mar 8 MST->MDT change, `datetime` TimeZone conversion in compute_L2 / compare_sat_candidates handles both offsets). cryosoop builds from 2026-07 on stamp UTC in code — set `'UTC'` (the conversion becomes an exact identity), and compute_L1 hard-errors if a UTC-marked run (summary.json `wall_clock: "UTC"`) is processed under a local zone. Never mix the two eras under one data root. If absent, timestamps are assumed already UTC |
 
 ### Weather overlay (viewer only)
 
@@ -52,6 +52,7 @@ Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
 |---|---|---|
 | `cfg.wx_dat` | local TOA5 `.dat` file (not distributed with the repo) | weather station 15-min data, viewer L2 + SNOdar plots only |
 | `cfg.wx_temp_cols` | `{'AirTC_Avg', 'Temp_C_Avg'}` | temperature columns overlaid on the SNOdar plots (two toggleable lines): `AirTC_Avg` = air temp (the melt-freeze driver); `Temp_C_Avg` = the sensor that `Processing/TemperaturePlot_SnowDepth.py` plots. Order maps to the viewer's `airtc_c`, `temp_c` toggles |
+| `cfg.wx_tz` | unset (legacy) / `'Etc/GMT+7'` | optional weather-logger clock zone (`site_config.json` `weather.wx_tz`). Campbell loggers run FIXED standard time year-round (no DST); Brundage's is UTC−7 = `'Etc/GMT+7'` — **POSIX sign convention: `Etc/GMT+7` IS UTC−7**, the sign is inverted. When set, `load_snodar` converts weather timestamps into the capture timebase (`cfg.capture_tz`, else UTC) so the viewer overlay aligns. When unset, timestamps pass through unconverted — the legacy 2025-26 behavior (logger standard time read as capture-local; a known ~1 h overlay offset during DST, accepted rather than retro-corrected). An invalid zone warns (naming the value) and yields an empty weather table |
 
 ### Elevation / satellite
 
