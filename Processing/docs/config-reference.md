@@ -5,6 +5,13 @@ passed to `soop_run_pipeline` and, from there, to each stage. This page is the
 full explanation for every field that only gets a one-line comment at its
 point of assignment in the entry script.
 
+Site-, machine-, and season-specific values (paths, site geometry,
+`capture_tz`, weather file, confirmed satellite) are not literals in
+`BrundageSoOp.m`: they are read from `Processing/site_config.json` and copied
+onto `cfg` — edit the JSON, not the script, when they change (see the README's
+"Deploying at a new site"). The values documented below are the shipped
+Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
+
 ## cfg fields
 
 ### Paths
@@ -51,7 +58,8 @@ point of assignment in the entry script.
 | Field | Value | Notes |
 |---|---|---|
 | `cfg.elev_dir` | `= cfg.input_dir` | compare_sat_candidates scans this dir for `muos_elevation_*.csv` |
-| `cfg.elev_table` | `fullfile(cfg.elev_dir, 'muos_elevation_41622.csv')` | elevation table for the CONFIRMED satellite, read by compute_L2. Pointing analysis predicts MUOS-5 (NORAD 41622); confirm with `compare_sat_candidates(cfg)` first if unconfirmed |
+| `cfg.elev_table` | `fullfile(cfg.elev_dir, sprintf('muos_elevation_%d.csv', site.season.norad))` | elevation table for the CONFIRMED satellite (`season.norad` in site_config.json, shipped 41622 = MUOS-5), read by compute_L2. Confirm with `compare_sat_candidates(cfg)` first if unconfirmed |
+| `cfg.matlab_jobs_dir` | `site.paths.hpc.matlab_jobs` | parpool JobStorageLocation root on the HPC (job-unique subdir per SLURM job) — soop_run_pipeline |
 | `cfg.snr_threshold` | `10` dB | used by compare_sat_candidates scoring |
 
 ### Overflow

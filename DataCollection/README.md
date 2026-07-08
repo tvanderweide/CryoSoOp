@@ -25,7 +25,7 @@ lives in the binary rather than in a per-capture shell loop.
 | `src/device/` | UHD-heavy: USRP session setup and lo-lock RF control. The only code that touches `uhd::usrp::multi_usrp` directly. |
 | `src/radiometer_driver.cpp` | Single-session sequence executor (NL/L/Signal), ring-buffered dual-channel capture, sample-counted stop. |
 | `src/main.cpp` | CLI parsing, config load, `MODE: radiometer` enforcement; always runs the radiometer driver. |
-| `config/` | `radiometer_B210.yaml`, `SCHEMA.md` (authoritative key reference). |
+| `config/` | `radiometer_B210.yaml`, `SCHEMA.md` (authoritative key reference), `site.env` (per-site settings — see "Deploying at a new site"). |
 | `orchestration/` | `radiometer_run.sh` (cron wrapper), `probe_nvme.sh` (storage probe), `bbb_set_state.sh` (BBB cal-switch helper). |
 | `tools/` | `validate_output.py` (output-contract checker), `yaml_compat.py`. |
 | `CMakeLists.txt` | Build graph (see below). |
@@ -234,29 +234,31 @@ individual run folder (`<DATA_DIR>/<YYYYMMDD>/<HHMMSS>`), not at `DATA_DIR` itse
 
 ## Deploying at a new site
 
-The RF/sequence configuration carries over unchanged, but everything that names *this*
-deployment's hardware, network, and storage must be updated. In order of likelihood:
+The RF/sequence configuration carries over unchanged. Nearly everything that names *this*
+deployment's hardware, network, and storage lives in **one file: `config/site.env`**
+(plain `KEY=value`, sourced and exported by `orchestration/radiometer_run.sh`). Checklist:
 
-1. **Storage paths** — `FILES.save_loc` in `config/radiometer_B210.yaml` (production capture
-   tree), plus the cron wrapper's `MOUNT` / `DATA_DIR` env vars and `probe_nvme.sh`'s target
-   directory (both default to `/mnt/snowData`). Run `probe_nvme.sh` standalone against the new
-   drive before trusting it.
+1. **Edit `config/site.env`** — storage (`MOUNT`, `DATA_DIR` — passed to `cryosoop` as
+   `--save-loc`, so the YAML needs no path edits; `MIN_FREE_GB`, `NVME_MIN_MBPS`), run
+   behavior (`RX_TIMEOUT_SEC`, `REBOOT_ON_FAIL`, `DEFAULT_GOV`), and the BeagleBone
+   cal switch (`BBB_HOST`, `GPIO_PINS`, per-state `NL_VALS`/`L_VALS`/`SIGNAL_VALS`).
+   Keep `REBOOT_ON_FAIL=0` until bench bring-up is complete. Run `probe_nvme.sh`
+   standalone against the new drive before trusting it.
 2. **System clock timezone** — capture filenames and run folders use the acquisition computer's
    **local** clock. Set the OS timezone deliberately (`sudo timedatectl set-timezone <IANA zone>`,
-   verify with `timedatectl`) and record it: the processing pipeline's `cfg.capture_tz` must be
-   set to the same IANA zone (see `Processing/README.md`, "Deploying at a new site") or every
-   satellite-geometry product misaligns by the UTC offset.
-3. **BeagleBone cal-switch helper** — `orchestration/bbb_set_state.sh` hardcodes the BBB address
-   (`BBB_HOST`, default `root@192.168.1.101`), the GPIO pin numbers, and the per-state pin
-   values. Edit that script for the new BBB's IP/pins (never the YAML), set up passwordless SSH
-   from the acquisition machine to the BBB (the script runs with `BatchMode=yes`, so a password
-   prompt is a hard failure), then re-install it:
+   verify with `timedatectl`) and record it: the processing pipeline's `site_config.json`
+   `capture_tz` must name the same zone (see `Processing/README.md`, "Deploying at a new site")
+   or every satellite-geometry product misaligns by the UTC offset.
+3. **BeagleBone SSH + install** — set up passwordless SSH from the acquisition machine to the
+   BBB (`bbb_set_state.sh` runs with `BatchMode=yes`, so a password prompt is a hard failure),
+   then install the helper where the YAML hooks expect it:
    `sudo install -m 0755 orchestration/bbb_set_state.sh /usr/local/bin/bbb_set_state.sh`.
-4. **Cron wrapper environment** — review every env var `orchestration/radiometer_run.sh`
-   consumes (`MOUNT`, `DATA_DIR`, `MIN_FREE_GB`, `NVME_MIN_MBPS`, `CONFIG`, `CRYOSOOP_BIN`,
-   `RX_TIMEOUT_SEC`, `REBOOT_ON_FAIL`, `DEFAULT_GOV`) and install the crontab entry for the new
-   machine. Keep `REBOOT_ON_FAIL=0` until bench bring-up is complete.
-5. **RX gain** — `RADIOMETER.gain` (54 dB) was set for this system's antenna + front-end chain.
+   For bench use without the wrapper: `set -a; . config/site.env; set +a; bbb_set_state.sh NL`.
+4. **Crontab** — install the cron entry for `radiometer_run.sh` on the new machine (see the
+   script header for the reference line). The wrapper sources `site.env` itself, so the cron
+   line needs no env prefixes.
+5. **RX gain (in the YAML, not site.env)** — `RADIOMETER.gain` (54 dB) was set for this
+   system's antenna + front-end chain.
    A different LNA/cable/antenna chain needs its own gain check (capture, inspect levels for
    clipping/quantization headroom) before season data is trusted. Center frequency, rate, and
    the NL/L/Signal sequence itself should not change.

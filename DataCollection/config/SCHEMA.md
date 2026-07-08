@@ -48,7 +48,7 @@ Defaults below are the in-code struct defaults (`config.hpp`). The shipped
 
 | Key | Type | Default | Consumer | Notes |
 |---|---|---|---|---|
-| `save_loc` | string | `data/B210/` | main | Acquisition root used when `--save-loc` is not given. In **both** cases the binary creates a per-run subfolder `<root>/<YYYYMMDD>/<HHMMSS>/` (local time) under the root and writes that run's `.dat` files, `events.csv`, `RunLog.log`, `config_effective.yaml`, and `summary.json` there — nothing appends/overwrites across runs. `--save-loc` overrides `save_loc` as the root (it is no longer used verbatim). Shipped config: `/mnt/snowData/SDR/Data/`. |
+| `save_loc` | string | `data/B210/` | main | Acquisition root used when `--save-loc` is not given. In **both** cases the binary creates a per-run subfolder `<root>/<YYYYMMDD>/<HHMMSS>/` (local time) under the root and writes that run's `.dat` files, `events.csv`, `RunLog.log`, `config_effective.yaml`, and `summary.json` there — nothing appends/overwrites across runs. `--save-loc` overrides `save_loc` as the root (it is no longer used verbatim); in production `radiometer_run.sh` always passes `--save-loc $DATA_DIR` from `config/site.env`, so per-site path changes go in site.env, not this key. Shipped config: `/mnt/snowData/SDR/Data/`. |
 
 ## RING
 
@@ -91,7 +91,7 @@ Defaults below are the in-code struct defaults (`config.hpp`). The shipped
 | `prefix` | string | — | radiometer | Output filename prefix (e.g. `UHF__NL_`, `UHF__L_`, `UHF_`). |
 | `count` | int | `1` | radiometer | Captures in this step. Must be > 0. |
 | `duration_s` | double (s) | `2.0` | radiometer | Per-capture duration. Must be > 0 and yield ≥ 1 sample. |
-| `state_cmd` | string | `""` | radiometer | Out-of-band state-change hook (SSH to the BeagleBone GPIO); runs via `exec_hook`, never in the RX hot path. The shipped config calls `/usr/local/bin/bbb_set_state.sh <state>` (source: `orchestration/bbb_set_state.sh`, installed once per Pi) — the single location for the BBB host address, GPIO pins, per-state values, and ssh hardening. `rc=0` means *verified* switch state: `set -e` (fail on first bad write) plus a read-back of the pin values against the commanded state; `BatchMode`/`ConnectTimeout=15`/`ServerAlive*` make an unreachable BBB fail fast instead of hanging. |
+| `state_cmd` | string | `""` | radiometer | Out-of-band state-change hook (SSH to the BeagleBone GPIO); runs via `exec_hook`, never in the RX hot path. The shipped config calls `/usr/local/bin/bbb_set_state.sh <state>` (source: `orchestration/bbb_set_state.sh`, installed once per Pi); the BBB host address, GPIO pins, and per-state values come from `config/site.env` (exported by `radiometer_run.sh`; the script's in-code defaults apply when run standalone), ssh hardening lives in the script. `rc=0` means *verified* switch state: `set -e` (fail on first bad write) plus a read-back of the pin values against the commanded state; `BatchMode`/`ConnectTimeout=15`/`ServerAlive*` make an unreachable BBB fail fast instead of hanging. |
 | `on_cmd_fail` | enum `abort\|continue` | `abort` | radiometer | Behaviour when `state_cmd` returns nonzero. |
 
 ## CAL

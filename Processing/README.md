@@ -50,33 +50,43 @@ points at. To inspect an excised product set instead of the base one, point
 
 ## Deploying at a new site
 
-The pipeline's signal-processing constants carry over unchanged, but several
-`cfg` fields near the top of `BrundageSoOp.m` encode the Brundage site and
-must be updated for a new deployment:
+The pipeline's signal-processing constants carry over unchanged. Everything
+site-, machine-, and season-specific lives in **one file:
+[`site_config.json`](site_config.json)** (read by `BrundageSoOp.m` and
+`tools/make_muos_elevation.py`, so site coordinates and season dates cannot
+drift between the two). Checklist:
 
-1. **Data and output paths** — set `cfg.data_dir` / `cfg.out_dir` (and the
-   paths in `run_BrundageSoOp.sh` if running under SLURM).
-2. **Capture timezone** — set `cfg.capture_tz` to the IANA timezone of the
-   acquisition computer's clock (e.g. `'America/Denver'`); verify the actual
+1. **Edit `site_config.json`** —
+   - `paths.local` / `paths.hpc`: data root, stable-inputs dir, and dated
+     output root for each machine you run on (`BrundageSoOp.m` picks the
+     block automatically).
+   - `site`: name, antenna `lat`/`lon`/`alt_m` (WGS84 ellipsoidal, at the
+     antenna phase center), `tower_h_m`, and `capture_tz`.
+   - `season`: `start`/`end` dates, candidate NORAD ids, and the confirmed
+     `norad` (see step 4).
+   - `weather` (optional): a local TOA5 `.dat` logger file and its
+     temperature column names for the viewer overlay.
+2. **Capture timezone** — `site.capture_tz` must be the IANA zone of the
+   acquisition computer's clock (e.g. `"America/Denver"`); verify the actual
    setting on the Pi with `timedatectl`. Capture filenames use the local
    clock, and this field is how `compute_L2` / `compare_sat_candidates`
    convert them to UTC for matching against the elevation tables — MATLAB's
    `datetime` handles daylight-saving transitions automatically once the
-   zone is correct. Caution: if `cfg.capture_tz` is left unset, timestamps
-   are assumed to already be UTC, which silently misaligns every
-   satellite-geometry product by the UTC offset.
-3. **Elevation tables** — regenerate with
-   `tools/make_muos_elevation.py --lat <deg N> --lon <deg E> --alt <m> --start <date> --end <date>`
-   for the new site's antenna coordinates and season (the script defaults
-   are the Brundage tower and the 2025-26 season). Place the CSVs in
-   `cfg.elev_dir`.
+   zone is correct. Caution: if it is wrong or missing, timestamps are
+   treated as already-UTC, which silently misaligns every satellite-geometry
+   product by the UTC offset.
+3. **Elevation tables** — regenerate with `tools/make_muos_elevation.py`
+   (its `--lat/--lon/--alt/--start/--end/--norad` defaults come from
+   `site_config.json`, so after step 1 no arguments are needed; CLI flags
+   still override). Place the CSVs in the stable-inputs dir
+   (`paths.*.input_dir`).
 4. **Confirm the tracked satellite** — do not assume the same MUOS bird.
    Run the sat-id stage (`run_satid`, i.e. `compare_sat_candidates`) over
-   the season's L1 output first, then point `cfg.elev_table` at the
-   confirmed NORAD id's CSV before enabling `run_L2`.
-5. **Weather overlay (optional)** — point `cfg.wx_dat` at a local weather
-   logger `.dat` file (TOA5) and set `cfg.wx_temp_cols` to its temperature
-   column names, or leave unset to skip the overlay.
+   the season's L1 output first, then set `season.norad` to the confirmed
+   id before enabling `run_L2`.
+5. **SLURM only** — the `#SBATCH` partition/log/mail lines and the `cd`
+   path in `run_BrundageSoOp.sh` are HPC-account-specific and must be
+   edited in that script (batch directives cannot read a config file).
 
 ## Dual-format support (legacy flat vs. cryosoop per-run)
 
