@@ -232,6 +232,41 @@ its own dated subfolder with its own `events.csv` / `RunLog.log` / `config_effec
 `summary.json` (no cross-run append or overwrite). Point `tools/validate_output.py` at an
 individual run folder (`<DATA_DIR>/<YYYYMMDD>/<HHMMSS>`), not at `DATA_DIR` itself.
 
+## Deploying at a new site
+
+The RF/sequence configuration carries over unchanged, but everything that names *this*
+deployment's hardware, network, and storage must be updated. In order of likelihood:
+
+1. **Storage paths** — `FILES.save_loc` in `config/radiometer_B210.yaml` (production capture
+   tree), plus the cron wrapper's `MOUNT` / `DATA_DIR` env vars and `probe_nvme.sh`'s target
+   directory (both default to `/mnt/snowData`). Run `probe_nvme.sh` standalone against the new
+   drive before trusting it.
+2. **System clock timezone** — capture filenames and run folders use the acquisition computer's
+   **local** clock. Set the OS timezone deliberately (`sudo timedatectl set-timezone <IANA zone>`,
+   verify with `timedatectl`) and record it: the processing pipeline's `cfg.capture_tz` must be
+   set to the same IANA zone (see `Processing/README.md`, "Deploying at a new site") or every
+   satellite-geometry product misaligns by the UTC offset.
+3. **BeagleBone cal-switch helper** — `orchestration/bbb_set_state.sh` hardcodes the BBB address
+   (`BBB_HOST`, default `root@192.168.1.101`), the GPIO pin numbers, and the per-state pin
+   values. Edit that script for the new BBB's IP/pins (never the YAML), set up passwordless SSH
+   from the acquisition machine to the BBB (the script runs with `BatchMode=yes`, so a password
+   prompt is a hard failure), then re-install it:
+   `sudo install -m 0755 orchestration/bbb_set_state.sh /usr/local/bin/bbb_set_state.sh`.
+4. **Cron wrapper environment** — review every env var `orchestration/radiometer_run.sh`
+   consumes (`MOUNT`, `DATA_DIR`, `MIN_FREE_GB`, `NVME_MIN_MBPS`, `CONFIG`, `CRYOSOOP_BIN`,
+   `RX_TIMEOUT_SEC`, `REBOOT_ON_FAIL`, `DEFAULT_GOV`) and install the crontab entry for the new
+   machine. Keep `REBOOT_ON_FAIL=0` until bench bring-up is complete.
+5. **RX gain** — `RADIOMETER.gain` (54 dB) was set for this system's antenna + front-end chain.
+   A different LNA/cable/antenna chain needs its own gain check (capture, inspect levels for
+   clipping/quantization headroom) before season data is trusted. Center frequency, rate, and
+   the NL/L/Signal sequence itself should not change.
+6. **Device identity (only if multiple USRPs are attached)** — `DEVICE.device_args` carries no
+   serial number, so the binary grabs the first B210 found. Add `serial=<...>` there if the new
+   machine hosts more than one device.
+
+After these edits, repeat the full bring-up order: build → `--help` / `uhd_usrp_probe` →
+smoke capture + `validate_output.py` → `bbb_set_state.sh` bench check → one full sequence.
+
 ## Status
 
 **Implemented:** `src/common/` (config, ring buffer, event log, `.dat` writer, summary/exit-code
