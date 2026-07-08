@@ -48,6 +48,36 @@ The viewer and the downstream stages both operate on whatever `cfg.out_dir`
 points at. To inspect an excised product set instead of the base one, point
 `cfg.out_dir` at that method's directory (e.g. `...\L1_notch`) and re-run.
 
+## Deploying at a new site
+
+The pipeline's signal-processing constants carry over unchanged, but several
+`cfg` fields near the top of `BrundageSoOp.m` encode the Brundage site and
+must be updated for a new deployment:
+
+1. **Data and output paths** — set `cfg.data_dir` / `cfg.out_dir` (and the
+   paths in `run_BrundageSoOp.sh` if running under SLURM).
+2. **Capture timezone** — set `cfg.capture_tz` to the IANA timezone of the
+   acquisition computer's clock (e.g. `'America/Denver'`); verify the actual
+   setting on the Pi with `timedatectl`. Capture filenames use the local
+   clock, and this field is how `compute_L2` / `compare_sat_candidates`
+   convert them to UTC for matching against the elevation tables — MATLAB's
+   `datetime` handles daylight-saving transitions automatically once the
+   zone is correct. Caution: if `cfg.capture_tz` is left unset, timestamps
+   are assumed to already be UTC, which silently misaligns every
+   satellite-geometry product by the UTC offset.
+3. **Elevation tables** — regenerate with
+   `tools/make_muos_elevation.py --lat <deg N> --lon <deg E> --alt <m> --start <date> --end <date>`
+   for the new site's antenna coordinates and season (the script defaults
+   are the Brundage tower and the 2025-26 season). Place the CSVs in
+   `cfg.elev_dir`.
+4. **Confirm the tracked satellite** — do not assume the same MUOS bird.
+   Run the sat-id stage (`run_satid`, i.e. `compare_sat_candidates`) over
+   the season's L1 output first, then point `cfg.elev_table` at the
+   confirmed NORAD id's CSV before enabling `run_L2`.
+5. **Weather overlay (optional)** — point `cfg.wx_dat` at a local weather
+   logger `.dat` file (TOA5) and set `cfg.wx_temp_cols` to its temperature
+   column names, or leave unset to skip the overlay.
+
 ## Dual-format support (legacy flat vs. cryosoop per-run)
 
 `compute_L1`, `compute_calib`, and `compute_rfi_spectrum` discover raw
