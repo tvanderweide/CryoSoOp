@@ -16,9 +16,12 @@ function soop_viewer_layout(V)
     gl.Padding   = [8 8 8 8];
 
     % Row 1 — plot type, aggregation, date range, action buttons, temp toggles
-    r1 = uigridlayout(gl, [1 12]);
+    % 13 children (10 controls + 3 weather checkboxes) — the grid must declare
+    % all 13 columns, or the extras wrap onto an auto-added second row that
+    % cannot fit in the fixed 38 px outer cell and the whole row clips.
+    r1 = uigridlayout(gl, [1 13]);
     r1.Layout.Row = 1;
-    r1.ColumnWidth = {270, 130, 42, 115, 26, 115, 86, 86, 76, 96, 100, 104};
+    r1.ColumnWidth = {270, 130, 42, 115, 26, 115, 86, 86, 76, 96, 'fit', 'fit', 'fit'};
     r1.Padding = [0 0 0 0];
 
     S.dd_plot = uidropdown(r1, 'Items', {PLOT_INFO.name}, 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
