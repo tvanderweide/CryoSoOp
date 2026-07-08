@@ -33,6 +33,46 @@ function compute_L1(cfg)
 % rfi_methods (default {'none'}), rfi_bands, muos_bands.
 %
 
+    % --- Find ch0/ch1 pairs (mirrors Python find_file_pairs) ---
+    % 'UHF_2' matches signal files (UHF_2025..., UHF_2026...) but not the
+    % calibration prefixes UHF__NL_ / UHF__L_ (double underscore). The '**'
+    % recurses into the cryosoop <YYYYMMDD>/<HHMMSS>/ per-run subfolders while
+    % still matching a legacy flat directory (** matches zero folder levels);
+    % each partner path is built from the hit's .folder (process_pair).
+    ch0_files = dir(fullfile(cfg.data_dir, '**', 'UHF_2*_ch0.dat'));
+    if isempty(ch0_files)
+        fprintf('[L1] No UHF_*_ch0.dat files found in %s\n', cfg.data_dir);
+        return;
+    end
+    base_names = string(erase({ch0_files.name}', '_ch0.dat'));
+
+    % --- Timezone-provenance guard (first, before any setup side effects) ---
+    % UTC-era cryosoop runs record "wall_clock": "UTC" in their per-run
+    % summary.json (legacy runs lack the field). Processing such runs with a
+    % local-zone cfg.capture_tz would silently shift every satellite-geometry
+    % product by the UTC offset, so refuse outright. capture_tz absent or
+    % 'UTC' is consistent with UTC stamps — no scan needed.
+    if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz) && ~strcmpi(cfg.capture_tz, 'UTC')
+        run_dirs = unique(string({ch0_files.folder}'));
+        for rd = run_dirs(:)'
+            sj = fullfile(rd, 'summary.json');
+            if ~isfile(sj), continue; end
+            try
+                s = jsondecode(fileread(sj));
+            catch
+                continue;   % unreadable summary — not a provenance signal
+            end
+            if isfield(s, 'wall_clock') && strcmpi(string(s.wall_clock), 'UTC')
+                error('BrundageSoOp:captureTzMismatch', ...
+                      ['%s is a UTC-stamped cryosoop run (summary.json wall_clock=UTC) but ' ...
+                       'cfg.capture_tz=''%s''. Set site_config.json "capture_tz" to "UTC" for ' ...
+                       'UTC-era data (local-zone capture_tz is only for legacy pre-UTC ' ...
+                       'seasons), and never mix the two eras under one data root.'], ...
+                      rd, string(cfg.capture_tz));
+            end
+        end
+    end
+
     % --- RFI excision methods + per-method output directories ---
     % Each method writes a self-contained product set so every downstream stage
     % runs unchanged per dir: 'none' -> cfg.out_dir (v3 path), 'notch_interp' ->
@@ -67,46 +107,6 @@ function compute_L1(cfg)
         else
             fprintf(['[L1] WARNING: overflow file not found (%s) — overflow_flag will ' ...
                      'be 0 for all rows.\n'], cfg.overflow_file);
-        end
-    end
-
-    % --- Find ch0/ch1 pairs (mirrors Python find_file_pairs) ---
-    % 'UHF_2' matches signal files (UHF_2025..., UHF_2026...) but not the
-    % calibration prefixes UHF__NL_ / UHF__L_ (double underscore). The '**'
-    % recurses into the cryosoop <YYYYMMDD>/<HHMMSS>/ per-run subfolders while
-    % still matching a legacy flat directory (** matches zero folder levels);
-    % each partner path is built from the hit's .folder (process_pair).
-    ch0_files = dir(fullfile(cfg.data_dir, '**', 'UHF_2*_ch0.dat'));
-    if isempty(ch0_files)
-        fprintf('[L1] No UHF_*_ch0.dat files found in %s\n', cfg.data_dir);
-        return;
-    end
-    base_names = string(erase({ch0_files.name}', '_ch0.dat'));
-
-    % --- Timezone-provenance guard -----------------------------------------
-    % UTC-era cryosoop runs record "wall_clock": "UTC" in their per-run
-    % summary.json (legacy runs lack the field). Processing such runs with a
-    % local-zone cfg.capture_tz would silently shift every satellite-geometry
-    % product by the UTC offset, so refuse outright. capture_tz absent or
-    % 'UTC' is consistent with UTC stamps — no scan needed.
-    if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz) && ~strcmpi(cfg.capture_tz, 'UTC')
-        run_dirs = unique(string({ch0_files.folder}'));
-        for rd = run_dirs(:)'
-            sj = fullfile(rd, 'summary.json');
-            if ~isfile(sj), continue; end
-            try
-                s = jsondecode(fileread(sj));
-            catch
-                continue;   % unreadable summary — not a provenance signal
-            end
-            if isfield(s, 'wall_clock') && strcmpi(string(s.wall_clock), 'UTC')
-                error('BrundageSoOp:captureTzMismatch', ...
-                      ['%s is a UTC-stamped cryosoop run (summary.json wall_clock=UTC) but ' ...
-                       'cfg.capture_tz=''%s''. Set site_config.json "capture_tz" to "UTC" for ' ...
-                       'UTC-era data (local-zone capture_tz is only for legacy pre-UTC ' ...
-                       'seasons), and never mix the two eras under one data root.'], ...
-                      rd, string(cfg.capture_tz));
-            end
         end
     end
 
