@@ -1,0 +1,108 @@
+# CryoSoOp — B210 SoOp radiometer configuration
+# Deployed values from the current SoOp system. Replaces the shell-hosted rx_samples_to_file
+# loop (SoOp/.../cpp_run_test_2025-12-15.bash) with a single UHD session that runs the whole
+# NL / L / Signal sequence, so all captures in a run share one inter-channel phase offset
+# (prerequisite for NL phase calibration). Every key is documented in config/SCHEMA.md.
+
+MODE: radiometer                         # radiometer (only)
+
+### DEVICE CONNECTION AND DATA TRANSFER
+DEVICE:
+    device_args: "master_clock_rate=20e6,num_recv_frames=700,recv_frame_size=8200"
+    subdev: "A:A A:B"                    # both frontends (dual RX)
+    clk_ref: internal
+    pps_ref: internal
+    master_clock_rate: 20e6               # fixed 20 MHz (also embedded in device_args as deployed).
+                                          # Read back and logged to events.csv (MASTER_CLOCK).
+    tx_channels: "0 1"                   # unused for RX-only radiometer, kept for symmetry
+    rx_channels: "0 1"
+    cpu_format: sc16                      # host format: interleaved int16 I/Q -> per-channel .dat
+    otw_format: sc16                      # on-the-wire format
+    rx_timeout_limit: 3                   # consecutive 1 s recv timeouts before aborting a capture
+
+### FILE LOCATIONS
+FILES:
+    save_loc: "/mnt/snowData/SDR/Data/"  # production capture tree (rsync-pulled)
+
+### RADIOMETER SEQUENCE
+RADIOMETER:
+    freq: 370e6                          # [Hz] UHF center
+    rate: 20e6                           # [Hz] sample rate
+    gain: 54                             # [dB] RX gain
+    bw: 20e6                             # [Hz] analog bandwidth (= rate if omitted)
+    rx_ant: RX2                          # antenna port per channel
+    chunk_secs: 10                       # [s] file rotation period (>= per-capture duration => 1 file)
+    settle_s: 2.0                        # [s] settle after a state_cmd before capturing
+    lo_lock_timeout_s: 2.0               # [s] lo_locked poll timeout at device setup
+    lo_lock_poll_s: 0.1                  # [s] lo_locked poll interval at device setup
+    max_stream_errors: 10                # unclassified stream errors before aborting a capture
+    # Restore the Signal state (49,115,27 = 1,1,0) at the end of the run.
+    final_state_cmd: "/usr/local/bin/bbb_set_state.sh Signal"
+    # Sequence: NL x2 -> L x2 -> Signal x15 -> NL x2 -> L x2. BeagleBone GPIO states drive the
+    # RF switch: NL (Noise+Load) = 49,115,27 -> 0,0,0 ; L (Load) = 0,0,1 ; Signal = 1,1,0.
+    # state_cmd calls bbb_set_state.sh (source: orchestration/bbb_set_state.sh; installed once
+    # per Pi via `sudo install -m 0755 orchestration/bbb_set_state.sh /usr/local/bin/`). The
+    # absolute /usr/local/bin path keeps the hook independent of where this repo lives and of
+    # cron's minimal PATH. That script is the SINGLE location for the BBB host address, GPIO
+    # pins, per-state pin values, and ssh hardening -- edit it, not these lines, to change any
+    # of those. It descends from set_bbb_state() in cpp_run_test_2025-12-15.bash, hardened
+    # 2026-07-07 so rc=0 means VERIFIED switch state, not just "ssh exited": set -e (fail on
+    # the FIRST bad write), a read-back of the pin values against the commanded state, and
+    # BatchMode/ConnectTimeout=15/ServerAlive* so a dead or prompting BBB fails fast with
+    # nonzero rc instead of hanging exec_hook until the wrapper's whole-run timeout.
+    # Runs via exec_hook (SSH), NOT in the RX hot path. on_cmd_fail: abort stops the run if the
+    # switch fails.
+    # (The legacy script suffixed the trailing NL/L sets "s"; here they reuse the base prefixes.)
+    sequence:
+        - state: NL
+          prefix: "UHF__NL_"
+          count: 2
+          duration_s: 2.0
+          on_cmd_fail: abort
+          state_cmd: "/usr/local/bin/bbb_set_state.sh NL"
+        - state: L
+          prefix: "UHF__L_"
+          count: 2
+          duration_s: 2.0
+          on_cmd_fail: abort
+          state_cmd: "/usr/local/bin/bbb_set_state.sh L"
+        - state: Signal
+          prefix: "UHF_"
+          count: 15
+          duration_s: 2.0
+          on_cmd_fail: abort
+          state_cmd: "/usr/local/bin/bbb_set_state.sh Signal"
+        - state: NL
+          prefix: "UHF__NL_"
+          count: 2
+          duration_s: 2.0
+          on_cmd_fail: abort
+          state_cmd: "/usr/local/bin/bbb_set_state.sh NL"
+        - state: L
+          prefix: "UHF__L_"
+          count: 2
+          duration_s: 2.0
+          on_cmd_fail: abort
+          state_cmd: "/usr/local/bin/bbb_set_state.sh L"
+
+### RING BUFFER
+RING:
+    ring_mb: 8192                         # [MiB] ~52 s of write-stall absorption at 160 MB/s
+                                          # (clamped to MemAvailable-1GiB on Linux)
+    on_full: drop_newest                  # radiometer policy is fixed to drop_newest (validated)
+    sync_every_mb: 64                     # [MiB] page-cache flush watermark per file
+
+### TIMEBASE / LOGGING
+TIMEBASE:
+    anchor: host_now                      # host_now | next_pps
+    events_csv: events.csv
+    human_log: RunLog.log
+
+### CALIBRATION HOOKS (reserved / config-gated no-ops)
+CAL:
+    common_source_captures: false         # reserved: per-session common-source cal step
+
+### DISK
+DISK:
+    disk_floor_gb: 8                      # [GB] graceful abort below this free space
+    nvme_min_mbps: 400                    # [MB/s] pre-flight throughput floor (probe_nvme)
