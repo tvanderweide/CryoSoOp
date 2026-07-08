@@ -1,0 +1,34 @@
+{
+  "about": "Per-site / per-machine settings for the Processing pipeline. THE ONE FILE to edit when deploying at a new site (see README.md 'Deploying at a new site'). Read by BrundageSoOp.m (jsondecode) and tools/make_muos_elevation.py; field rationale in docs/config-reference.md. Science parameters stay in BrundageSoOp.m.",
+  "site": {
+    "name": "Brundage",
+    "lat": 44.99908744,
+    "lon": -116.133436,
+    "alt_m": 2247.113,
+    "tower_h_m": 6.096,
+    "capture_tz": "America/Boise"
+  },
+  "season": {
+    "start": "2025-11-10",
+    "end": "2026-06-12",
+    "norad": 41622,
+    "candidate_norads": [38093, 41622]
+  },
+  "paths": {
+    "hpc": {
+      "data_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/Data/",
+      "input_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/Static",
+      "out_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/2026-06-24/",
+      "matlab_jobs": "/bsuscratch/thomasvanderweide/BrundageSoOp/matlab_jobs"
+    },
+    "local": {
+      "data_dir": "F:\\Data\\",
+      "input_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\Static",
+      "out_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\2026-06-24\\"
+    }
+  },
+  "weather": {
+    "wx_dat": "C:\\Users\\thomasvanderweide\\Documents\\Projects\\CryoSoOp\\Background\\20260608_Brundage_15Min.dat",
+    "wx_temp_cols": ["AirTC_Avg", "Temp_C_Avg"]
+  }
+}

@@ -9,6 +9,10 @@
 #SBATCH --mail-user=thomasvanderweide@boisestate.edu
 
 # Full-season Brundage SoOp L1 + calibration run (headless).
+# NEW DEPLOYMENTS: the #SBATCH partition/log path/mail-user, the module load,
+# and the cd path in this script are HPC-account-specific — edit them here
+# (SBATCH directives cannot be read from a config file); everything else
+# site-specific lives in site_config.json.
 # Interruption-safe: if walltime expires or the job is cancelled, at most one
 # batch (cfg.batch_size pairs) is lost — just sbatch again to resume.
 #

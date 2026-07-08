@@ -27,8 +27,10 @@ Usage (defaults cover the 2025-26 Brundage season):
 """
 
 import argparse
+import json
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 from skyfield.api import load, wgs84
@@ -37,6 +39,34 @@ MUOS = {
     38093: "MUOS-1",
     41622: "MUOS-5",
 }
+
+# CLI defaults come from ../site_config.json (shared with BrundageSoOp.m so the
+# site coordinates and season dates cannot drift apart); the hardcoded fallbacks
+# keep the script runnable standalone if the JSON is missing.
+_SITE_JSON = Path(__file__).resolve().parent.parent / "site_config.json"
+_FALLBACKS = {
+    "lat": 44.99908744, "lon": -116.133436, "alt_m": 2247.113,
+    "start": "2025-11-10", "end": "2026-06-12",
+    "candidate_norads": list(MUOS),
+}
+
+
+def _site_defaults() -> dict:
+    """Merge site_config.json over the hardcoded fallbacks."""
+    d = dict(_FALLBACKS)
+    try:
+        cfg = json.loads(_SITE_JSON.read_text())
+        d["lat"] = cfg["site"]["lat"]
+        d["lon"] = cfg["site"]["lon"]
+        d["alt_m"] = cfg["site"]["alt_m"]
+        d["start"] = cfg["season"]["start"]
+        d["end"] = cfg["season"]["end"]
+        d["candidate_norads"] = cfg["season"].get(
+            "candidate_norads", d["candidate_norads"])
+    except (OSError, KeyError, ValueError) as exc:
+        print(f"  note: {_SITE_JSON.name} not used ({exc}); "
+              "falling back to built-in Brundage defaults")
+    return d
 
 
 def fetch_tles(norad_id, start, end, cache_path):
@@ -109,20 +139,23 @@ def make_table(norad_id, start, end, cadence_min, site, ts, out_dir):
 
 
 def main():
+    sd = _site_defaults()
     p = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    p.add_argument("--norad", type=int, nargs="+", default=list(MUOS),
-                   help="NORAD catalog ids (default: all five MUOS)")
-    p.add_argument("--start", default="2025-11-10")
-    p.add_argument("--end", default="2026-06-12")
-    p.add_argument("--lat", type=float, default=44.99908744,
-                   help="site latitude, deg N (Brundage tower, RS2 survey)")
-    p.add_argument("--lon", type=float, default=-116.133436,
-                   help="site longitude, deg E (RS2 survey)")
-    p.add_argument("--alt", type=float, default=2247.113,
+    p.add_argument("--norad", type=int, nargs="+", default=sd["candidate_norads"],
+                   help="NORAD catalog ids "
+                        "(default: season.candidate_norads from site_config.json)")
+    p.add_argument("--start", default=sd["start"])
+    p.add_argument("--end", default=sd["end"])
+    p.add_argument("--lat", type=float, default=sd["lat"],
+                   help="site latitude, deg N (default: site_config.json)")
+    p.add_argument("--lon", type=float, default=sd["lon"],
+                   help="site longitude, deg E (default: site_config.json)")
+    p.add_argument("--alt", type=float, default=sd["alt_m"],
                    help="site altitude, m WGS84 ellipsoidal (antenna; <0.001 deg effect)")
     p.add_argument("--cadence-min", type=float, default=1.0)
-    p.add_argument("--out-dir",
-                   default=r"C:\Users\thomasvanderweide\Documents\Data\BrundageSoOp\2026")
+    p.add_argument("--out-dir", default=os.getcwd(),
+                   help="output/TLE-cache dir (default: current directory; use the "
+                        "pipeline's stable-inputs dir, cfg.elev_dir)")
     args = p.parse_args()
 
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)

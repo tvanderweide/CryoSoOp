@@ -35,10 +35,14 @@ if any([toggles.run_L1, toggles.run_calib, toggles.run_snr, toggles.run_rfi]) &&
     if ~isempty(job_id)
         % Job-unique pool metadata dir — concurrent MATLAB jobs sharing the
         % default ~/.matlab location corrupt each other's pool state.
-        % TODO: retired-season scratch tree (/bsuscratch/.../BrundageSoOp);
-        % confirm the cryosoop-era scratch path once the B210 season is
-        % provisioned on Borah. No functional change for now.
-        js = fullfile('/bsuscratch/thomasvanderweide/BrundageSoOp/matlab_jobs', job_id);
+        % Root comes from site_config.json (paths.hpc.matlab_jobs) via
+        % cfg.matlab_jobs_dir; the literal fallback keeps old cfg structs working.
+        if isfield(cfg, 'matlab_jobs_dir')
+            jobs_root = cfg.matlab_jobs_dir;
+        else
+            jobs_root = '/bsuscratch/thomasvanderweide/BrundageSoOp/matlab_jobs';
+        end
+        js = fullfile(jobs_root, job_id);
         if ~isfolder(js), mkdir(js); end
         c.JobStorageLocation = js;
     end

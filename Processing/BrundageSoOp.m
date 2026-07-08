@@ -15,34 +15,39 @@ soop_setup_paths;
 on_hpc   = isunix;                  % Borah (Linux) vs local Windows
 is_batch = batchStartupOptionUsed;  % true when launched via matlab -batch (sbatch) — no figure windows possible
 
+%% Site configuration (per-site / per-machine values — edit site_config.json, NOT here)
+% All paths, site geometry, capture timezone, weather file, and the confirmed
+% satellite live in site_config.json next to this script; science parameters stay
+% below. soop_setup_paths (line 12) put the Processing root on the path, so locate
+% the JSON relative to it (robust however this script is invoked).
+site = jsondecode(fileread(fullfile(fileparts(which('soop_setup_paths')), ...
+                                    'site_config.json')));
+
 %% Configuration (processing params identical on both systems)
 % cfg.input_dir = STABLE season inputs (overflow list, muos_elevation_*, rfi_bands) shared by every dated run.
-% cfg.out_dir below is the dated run ROOT (edit per re-run); it is re-derived into fig_dir (Figures) + out_dir (L1 leaf).
+% site.paths.*.out_dir is the dated run ROOT (edit per re-run); it is re-derived into fig_dir (Figures) + out_dir (L1 leaf).
 % rfi_excise.method_out_dir string-suffixes the leaf, so 'notch_interp' lands in a sibling L1_notch\ folder.
 if on_hpc
     % Retired 2025-26 season scratch tree (flat rx_samples_to_file captures on
-    % Borah). The cryosoop Borah/Borah-scratch deploy is TBD — update these
+    % Borah). The cryosoop Borah/Borah-scratch deploy is TBD — update the JSON
     % paths (and expect the per-run <YYYYMMDD>/<HHMMSS>/ layout) when it lands.
-    cfg.data_dir  = '/bsuscratch/thomasvanderweide/BrundageSoOp/Data/';
-    cfg.input_dir = '/bsuscratch/thomasvanderweide/BrundageSoOp/Static';
-    cfg.out_dir   = '/bsuscratch/thomasvanderweide/BrundageSoOp/2026-06-24/';
+    paths = site.paths.hpc;
 else
     % --- FUTURE: cryosoop B210 field data (per-run layout) --------------------
     % cryosoop writes <DATA_ROOT>/<YYYYMMDD>/<HHMMSS>/ per-run subfolders;
     % compute_L1 / compute_calib / compute_rfi_spectrum now discover captures
-    % recursively (dir '**'), so cfg.data_dir points at the DATA_ROOT and the
+    % recursively (dir '**'), so data_dir points at the DATA_ROOT and the
     % nested run folders are found automatically. Regenerate the overflow list
     % from the per-run events.csv logs (events auto-mode) with, e.g.:
     %   find_overflows('<DATA_ROOT>', '<input_dir>\overflow_timestamps.txt')
-    % TODO: set these once B210 field data lands:
-    %   cfg.data_dir  = '<DATA_ROOT>';   % e.g. ...\CryoSoOp\Data
-    %   cfg.input_dir = '<STATIC_DIR>';  % stable season inputs (overflow list, elev, rfi_bands)
-    %   cfg.out_dir   = '<DATED_RUN_ROOT>';
+    % TODO: update site_config.json paths.local once B210 field data lands
+    %   (data_dir = DATA_ROOT; input_dir = stable season inputs; out_dir = dated run root).
     % -------------------------------------------------------------------------
-    cfg.data_dir  = 'F:\Data\';   % external drive: ~95% of season raw data
-    cfg.input_dir = 'C:\Users\thomasvanderweide\Documents\Data\BrundageSoOp\Static';
-    cfg.out_dir   = 'C:\Users\thomasvanderweide\Documents\Data\BrundageSoOp\2026-06-24\';
+    paths = site.paths.local;
 end
+cfg.data_dir  = paths.data_dir;
+cfg.input_dir = paths.input_dir;
+cfg.out_dir   = paths.out_dir;
 cfg.fig_dir = fullfile(cfg.out_dir, 'Figures');
 cfg.out_dir = fullfile(cfg.out_dir, 'L1');
 cfg.fs           = 20e6;        % sample rate (Hz)
@@ -51,14 +56,18 @@ cfg.num_segs     = 2;           % segments to coherently average per file
 cfg.peak_lag     = -0.575;      % target lag (samples); sign validated 2026-01-28: -0.575 (+1.4 dB SNR vs +0.575)
 cfg.lag_half_win = 2500;        % analysis window half-width (matches Python llm/uum ±2500)
 cfg.freq_hz      = 370e6;       % center frequency (Hz); lambda = c/f = 0.8102 m for L2
-cfg.tower_h_m    = 6.096;       % tower height (m), 20 ft — confirmed 2026-06-12; RS2 survey 2026-06-15 reconfirms
+cfg.tower_h_m    = site.site.tower_h_m;  % tower height (m) — from site_config.json
 cfg.T_load_K     = 303;         % load temperature (K), assumed ambient
 
-% --- L2 geometric correction (site from Emlid Reach RS2 survey, 2026-06-15) ---
-cfg.site_lat   = 44.99908744;   % deg N  (RS2)
-cfg.site_lon   = -116.133436;   % deg E  (RS2)
-cfg.site_alt_m = 2247.113;      % m, WGS84 ellipsoidal — antenna phase center (ground 2241.017 + 6.096 m tower); <0.001 deg at GEO
-cfg.capture_tz = 'America/Boise';  % Pi clock TZ — VERIFIED 2026-06-12 timedatectl (Local MDT, RTC UTC); filenames local, span Mar 8 MST->MDT
+% --- L2 geometric correction (site geometry from site_config.json) ---
+% Brundage values are from the Emlid Reach RS2 survey 2026-06-15; alt is WGS84
+% ellipsoidal at the antenna phase center (ground + tower). capture_tz is the
+% acquisition Pi's IANA clock zone (Brundage VERIFIED 2026-06-12 via timedatectl:
+% local MDT, RTC UTC); filenames are local time, the season spans the March DST change.
+cfg.site_lat   = site.site.lat;      % deg N
+cfg.site_lon   = site.site.lon;      % deg E
+cfg.site_alt_m = site.site.alt_m;    % m, WGS84 ellipsoidal (antenna phase center)
+cfg.capture_tz = site.site.capture_tz;
 % Chain-phase cal reference (compute_L2): sign flipped 2026-07-06 when compute_calib
 % was unified to the D.*conj(R) convention (calib chain series negates); magnitude
 % 81.4 deg from the season notch-phase series (docs/config-reference.md#chain-cal-knobs).
@@ -66,14 +75,16 @@ cfg.chain_phase_ref_deg = -81.4;
 cfg.snr_threshold  = 10;        % dB; used by compare_sat_candidates scoring
 % Stable season input (not per-run): overflow capture list (find_overflows.m).
 cfg.overflow_file  = fullfile(cfg.input_dir, 'overflow_timestamps.txt');
-% Weather station TOA5 file (local copy) — viewer L2: Candidates weather overlay
-% (Snow depth / AirTC_Avg / Temp_C_Avg checkboxes) only.
-cfg.wx_dat = 'C:\Users\thomasvanderweide\Documents\Projects\CryoSoOp\Background\20260608_Brundage_15Min.dat';
-% Temp columns overlaid on SNOdar plots: AirTC_Avg (air temp, melt-freeze driver), Temp_C_Avg (TemperaturePlot_SnowDepth.py sensor); order maps to airtc_c, temp_c.
-cfg.wx_temp_cols = {'AirTC_Avg', 'Temp_C_Avg'};
-% Elevation tables (make_muos_elevation.py), stable inputs in cfg.elev_dir: sat-id scans elev_dir for muos_elevation_*.csv; compute_L2 reads cfg.elev_table for the CONFIRMED sat (predicted MUOS-5 41622 — confirm via compare_sat_candidates first).
+% Weather station TOA5 file (from site_config.json; local copy) — viewer L2:
+% Candidates weather overlay (Snow depth / temperature checkboxes) only.
+% wx_temp_cols order maps to airtc_c, temp_c.
+cfg.wx_dat       = site.weather.wx_dat;
+cfg.wx_temp_cols = reshape(site.weather.wx_temp_cols, 1, []);  % jsondecode gives a column cell
+% Elevation tables (make_muos_elevation.py), stable inputs in cfg.elev_dir: sat-id scans elev_dir for muos_elevation_*.csv; compute_L2 reads cfg.elev_table for the CONFIRMED sat (site_config.json season.norad — confirm via compare_sat_candidates first).
 cfg.elev_dir   = cfg.input_dir;
-cfg.elev_table = fullfile(cfg.elev_dir, 'muos_elevation_41622.csv');
+cfg.elev_table = fullfile(cfg.elev_dir, sprintf('muos_elevation_%d.csv', site.season.norad));
+% Parpool job storage on the HPC (soop_run_pipeline).
+cfg.matlab_jobs_dir = site.paths.hpc.matlab_jobs;
 
 % Minimum valid size PER CHANNEL FILE (interleaved I/Q int16): num_segs*Ti*fs*2*2 = 144,000,000 B.
 % Healthy cryosoop captures are EXACTLY 160,000,000 B (2.0 s * 20 MS/s * 4 B sc16); old-season
