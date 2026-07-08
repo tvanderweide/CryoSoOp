@@ -243,11 +243,24 @@ deployment's hardware, network, and storage lives in **one file: `config/site.en
 (plain `KEY=value`, sourced and exported by `orchestration/radiometer_run.sh`). Checklist:
 
 1. **Edit `config/site.env`** — storage (`MOUNT`, `DATA_DIR` — passed to `cryosoop` as
-   `--save-loc`, so the YAML needs no path edits; `MIN_FREE_GB`, `NVME_MIN_MBPS`), run
-   behavior (`RX_TIMEOUT_SEC`, `REBOOT_ON_FAIL`, `DEFAULT_GOV`), and the BeagleBone
+   `--save-loc`, so the YAML needs no path edits; `REQUIRE_MOUNT`, `MIN_FREE_GB`,
+   `NVME_MIN_MBPS`), run behavior (`RX_TIMEOUT_SEC`, `REBOOT_ON_FAIL`, `DEFAULT_GOV`),
+   optional post-collection transfer (`TRANSFER_DIR`, `TRANSFER_MODE`), and the BeagleBone
    cal switch (`BBB_HOST`, `GPIO_PINS`, per-state `NL_VALS`/`L_VALS`/`SIGNAL_VALS`).
    Keep `REBOOT_ON_FAIL=0` until bench bring-up is complete. Run `probe_nvme.sh`
    standalone against the new drive before trusting it.
+
+   **Recording drive & post-run transfer.** By default (`REQUIRE_MOUNT=1`) `DATA_DIR` must
+   sit under a dedicated mount that the wrapper guards with a `mountpoint` check. To record
+   instead to a plain local directory that is not its own mount (e.g. a path on the rootfs),
+   set `REQUIRE_MOUNT=0` — the mountpoint check is skipped and the free-space/throughput
+   checks run against `DATA_DIR` directly. To relocate each finished run off the recording
+   drive after capture, set `TRANSFER_DIR` to the destination and `TRANSFER_MODE` to `move`
+   (frees the recording drive; source deleted only after a verified copy) or `copy` (keeps
+   both). The transfer runs only after a usable capture (exit 0/1), preserves the
+   `<YYYYMMDD>/<HHMMSS>/` tree, and never changes the run's exit code — a missing/unmounted
+   target just logs a warning and leaves the data in place for the next run to sweep.
+   `config/site_CSSL.env` is a worked example of the record-local-then-move pattern.
 2. **System clock** — capture filenames and run folders are stamped in **UTC in code**, so the
    OS timezone setting no longer affects the data; set it to whatever is convenient for field
    work, but do verify the clock is NTP-synced (`timedatectl show-timesync`). On the processing
