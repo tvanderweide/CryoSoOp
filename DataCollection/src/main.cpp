@@ -127,8 +127,10 @@ int main(int argc, char** argv) {
     // events.csv / RunLog.log / config_effective.yaml / summary.json / .dat files instead of
     // appending or overwriting across runs. `root` = --save-loc if given, else FILES.save_loc. The
     // cron orchestrator still passes --save-loc "$DATA_DIR"; the binary now creates the dated run
-    // subfolders under it (no orchestration change needed). One host_unix_us() sample feeds both
-    // folder components so a run straddling midnight does not split across two date folders.
+    // subfolders under it (no orchestration change needed). Folder stamps are UTC (types.hpp), so
+    // the day boundary is UTC midnight — local evening runs land under the next UTC date. One
+    // host_unix_us() sample feeds both folder components so a run straddling midnight does not
+    // split across two date folders.
     std::string save_root;
     {
         const std::string root = save_loc_override.empty() ? cfg.files.save_loc : save_loc_override;

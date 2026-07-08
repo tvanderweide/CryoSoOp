@@ -124,6 +124,9 @@ void run_radiometer(const Config& cfg, const std::string& save_root, bool until_
                     EventLog& log, Counters& counters, SummaryMeta& meta) {
     meta.mode = "radiometer";
     meta.wall_start = iso_now();
+    // Wall-clock provenance for the processing side: stamps are UTC (types.hpp). Legacy runs
+    // (pre-UTC builds) lack this field, which is how downstream tells the two eras apart.
+    meta.extra.emplace_back("wall_clock", "\"UTC\"");
 
     const double rate = cfg.radiometer.rate;
 
