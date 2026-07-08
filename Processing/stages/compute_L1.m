@@ -83,6 +83,33 @@ function compute_L1(cfg)
     end
     base_names = string(erase({ch0_files.name}', '_ch0.dat'));
 
+    % --- Timezone-provenance guard -----------------------------------------
+    % UTC-era cryosoop runs record "wall_clock": "UTC" in their per-run
+    % summary.json (legacy runs lack the field). Processing such runs with a
+    % local-zone cfg.capture_tz would silently shift every satellite-geometry
+    % product by the UTC offset, so refuse outright. capture_tz absent or
+    % 'UTC' is consistent with UTC stamps — no scan needed.
+    if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz) && ~strcmpi(cfg.capture_tz, 'UTC')
+        run_dirs = unique(string({ch0_files.folder}'));
+        for rd = run_dirs(:)'
+            sj = fullfile(rd, 'summary.json');
+            if ~isfile(sj), continue; end
+            try
+                s = jsondecode(fileread(sj));
+            catch
+                continue;   % unreadable summary — not a provenance signal
+            end
+            if isfield(s, 'wall_clock') && strcmpi(string(s.wall_clock), 'UTC')
+                error('BrundageSoOp:captureTzMismatch', ...
+                      ['%s is a UTC-stamped cryosoop run (summary.json wall_clock=UTC) but ' ...
+                       'cfg.capture_tz=''%s''. Set site_config.json "capture_tz" to "UTC" for ' ...
+                       'UTC-era data (local-zone capture_tz is only for legacy pre-UTC ' ...
+                       'seasons), and never mix the two eras under one data root.'], ...
+                      rd, string(cfg.capture_tz));
+            end
+        end
+    end
+
     % --- Archive + reprocess any L1 sig CSV missing the freq-domain phase ---
     % fd columns can't be back-patched.
     for mi = 1:nM

@@ -404,6 +404,12 @@ function WX = load_snodar(cfg)
 % The two temperature columns (cfg.wx_temp_cols, default AirTC_Avg / Temp_C_Avg)
 % feed the viewer's toggleable SNOdar-overlay temperature lines.
 %
+% Timestamp timebase: when cfg.wx_tz is set (the logger's clock zone — Campbell
+% loggers run FIXED standard time year-round, no DST), timestamps are converted
+% into the capture timebase (cfg.capture_tz if set, else UTC) so the viewer
+% overlay aligns with the capture timestamp column. When cfg.wx_tz is absent,
+% timestamps pass through unconverted (legacy behavior: logger clock as-is).
+%
 % Uses SnoDAR_snow_depth_Avg directly. The device applies its own per-season
 % calibrated reference height (~2.81 m WY2024, ~3.79 m WY2026); a fixed
 % distance-based formula causes season-dependent offsets up to ~1 m.
@@ -488,6 +494,27 @@ function WX = load_snodar(cfg)
         depth_num = depth_num(keep);
         airtc_num = airtc_num(keep);
         tempc_num = tempc_num(keep);
+
+        % Weather logger clock -> capture timebase (see header). Brundage logger
+        % zone is 'Etc/GMT+7' — POSIX sign convention: Etc/GMT+7 IS UTC-7. An
+        % invalid zone lands in the outer catch (empty WX + warning) with the
+        % offending value named.
+        if isfield(cfg, 'wx_tz') && ~isempty(cfg.wx_tz)
+            if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz)
+                target = cfg.capture_tz;
+            else
+                target = 'UTC';
+            end
+            try
+                ts.TimeZone = cfg.wx_tz;   % declare the logger's clock zone
+                ts.TimeZone = target;      % convert the instant
+                ts.TimeZone = '';          % back to naive, in the capture timebase
+            catch tzME
+                error('BrundageSoOp:snodarTz', ...
+                      'weather timezone conversion failed (wx_tz=''%s'', target=''%s''): %s', ...
+                      string(cfg.wx_tz), string(target), tzME.message);
+            end
+        end
 
         % Spike/dip filter: 97-pt sliding median (24-hour window at 15-min sampling).
         % The wider window catches multi-reading near-zero dips that a short window

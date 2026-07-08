@@ -26,10 +26,11 @@ function compare_sat_candidates(cfg)
 %                                    full band + MUOS sub-bands), plus
 %                                    phase_raw_fd_deg / phase_raw_fd_muos_deg.
 %
-% Note: capture timestamps use the Pi's LOCAL clock (cfg.capture_tz,
-% verified 'America/Boise' via timedatectl 2026-06-12); elevation tables
-% are UTC. The timezone conversion handles MST/MDT incl. the March DST
-% change. If cfg.capture_tz is absent, timestamps are assumed UTC.
+% Note: cfg.capture_tz names the capture-stamp timebase; elevation tables
+% are UTC. Legacy 2025-26 data used the Pi's LOCAL clock ('America/Boise',
+% verified via timedatectl 2026-06-12; conversion handles MST/MDT incl.
+% the March DST change). UTC-era cryosoop data uses capture_tz "UTC"
+% (identity). If cfg.capture_tz is absent, timestamps are assumed UTC.
 %
 
     if ~isfield(cfg, 'snr_threshold'), cfg.snr_threshold = 10; end
@@ -193,9 +194,11 @@ function y = wrap180(x)
 end
 
 function t_utc = to_utc(t, cfg)
-% Convert naive capture timestamps (Pi local clock) to naive UTC.
+% Convert naive capture timestamps (cfg.capture_tz timebase) to naive UTC.
 % Declaring the zone keeps the clock face; switching to UTC converts the
-% instant (MST/MDT and the March DST change handled automatically).
+% instant (MST/MDT and the March DST change handled automatically for
+% legacy local-clock seasons; exact identity when capture_tz is 'UTC',
+% the setting for UTC-stamped cryosoop data).
     if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz)
         t.TimeZone = cfg.capture_tz;
         t.TimeZone = 'UTC';

@@ -45,11 +45,13 @@ function compute_L2(cfg)
 % span get theta = NaN and are skipped with a message (extend the table
 % rather than extrapolating).
 %
-% Timezone: capture filenames use the Pi's LOCAL clock (cfg.capture_tz,
-% verified 'America/Boise' via timedatectl 2026-06-12); the elevation
-% table is UTC. The conversion below handles MST/MDT including the
-% March DST change. If cfg.capture_tz is absent, timestamps are assumed
-% to already be UTC.
+% Timezone: cfg.capture_tz names the timebase of the capture filename
+% stamps; the elevation table is UTC. Legacy 2025-26 data used the Pi's
+% LOCAL clock ('America/Boise', verified via timedatectl 2026-06-12) and
+% the conversion below handles MST/MDT including the March DST change.
+% cryosoop builds from 2026-07 on stamp UTC in code — capture_tz "UTC"
+% makes to_utc an exact identity. If cfg.capture_tz is absent,
+% timestamps are assumed to already be UTC.
 %
 
     sig_csv = fullfile(cfg.out_dir, 'BrundageSoOp_L1_sig.csv');
@@ -276,9 +278,11 @@ function v = getfield_default(s, name, default)
 end
 
 function t_utc = to_utc(t, cfg)
-% Convert naive capture timestamps (Pi local clock) to naive UTC.
+% Convert naive capture timestamps (cfg.capture_tz timebase) to naive UTC.
 % Declaring the zone keeps the clock face; switching to UTC converts the
-% instant (MST/MDT and the March DST change handled automatically).
+% instant (MST/MDT and the March DST change handled automatically for
+% legacy local-clock seasons; exact identity when capture_tz is 'UTC',
+% the setting for UTC-stamped cryosoop data).
     if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz)
         t.TimeZone = cfg.capture_tz;
         t.TimeZone = 'UTC';

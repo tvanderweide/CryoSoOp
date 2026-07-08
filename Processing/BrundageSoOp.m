@@ -61,9 +61,12 @@ cfg.T_load_K     = 303;         % load temperature (K), assumed ambient
 
 % --- L2 geometric correction (site geometry from site_config.json) ---
 % Brundage values are from the Emlid Reach RS2 survey 2026-06-15; alt is WGS84
-% ellipsoidal at the antenna phase center (ground + tower). capture_tz is the
-% acquisition Pi's IANA clock zone (Brundage VERIFIED 2026-06-12 via timedatectl:
-% local MDT, RTC UTC); filenames are local time, the season spans the March DST change.
+% ellipsoidal at the antenna phase center (ground + tower). capture_tz names the
+% timebase of the capture filename stamps: for the LEGACY 2025-26 season that is
+% the Pi's IANA clock zone ('America/Boise', VERIFIED 2026-06-12 via timedatectl;
+% filenames local, season spans the March DST change). cryosoop builds from
+% 2026-07 on stamp UTC in code — new-season site_config.json must say "UTC"
+% (compute_L1 hard-errors on UTC-stamped runs processed with a local zone).
 cfg.site_lat   = site.site.lat;      % deg N
 cfg.site_lon   = site.site.lon;      % deg E
 cfg.site_alt_m = site.site.alt_m;    % m, WGS84 ellipsoidal (antenna phase center)
@@ -80,6 +83,15 @@ cfg.overflow_file  = fullfile(cfg.input_dir, 'overflow_timestamps.txt');
 % wx_temp_cols order maps to airtc_c, temp_c.
 cfg.wx_dat       = site.weather.wx_dat;
 cfg.wx_temp_cols = reshape(site.weather.wx_temp_cols, 1, []);  % jsondecode gives a column cell
+% Optional weather logger clock zone (site_config.json weather.wx_tz). Campbell
+% loggers run FIXED standard time year-round (no DST); Brundage's is UTC-7 =
+% IANA 'Etc/GMT+7' (POSIX sign convention: Etc/GMT+7 IS UTC-7, the sign is
+% inverted). When set, load_snodar converts weather timestamps into the capture
+% timebase (capture_tz); absent = no conversion (legacy 2025-26 behavior, which
+% treated logger time as capture-local — keep it absent for that season).
+if isfield(site.weather, 'wx_tz') && ~isempty(site.weather.wx_tz)
+    cfg.wx_tz = site.weather.wx_tz;
+end
 % Elevation tables (make_muos_elevation.py), stable inputs in cfg.elev_dir: sat-id scans elev_dir for muos_elevation_*.csv; compute_L2 reads cfg.elev_table for the CONFIRMED sat (site_config.json season.norad — confirm via compare_sat_candidates first).
 cfg.elev_dir   = cfg.input_dir;
 cfg.elev_table = fullfile(cfg.elev_dir, sprintf('muos_elevation_%d.csv', site.season.norad));
