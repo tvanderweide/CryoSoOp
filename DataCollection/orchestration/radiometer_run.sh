@@ -87,7 +87,7 @@ if [ -z "${CRYOSOOP_BIN:-}" ]; then
   [ -z "${CRYOSOOP_BIN:-}" ] && CRYOSOOP_BIN="$(command -v cryosoop || echo cryosoop)"
 fi
 
-log() { echo "[$(date --iso-8601=seconds)] $*"; }
+log() { echo "[$(date -u --iso-8601=seconds)] $*"; }  # UTC, matching cryosoop's stamps
 
 # --- pre-flight: mount present ---
 if ! mountpoint -q "$MOUNT"; then
