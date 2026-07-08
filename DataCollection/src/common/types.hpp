@@ -4,8 +4,11 @@
 // layer maps uhd::rx_metadata_t error codes onto the ev:: vocabulary so the common code and the
 // driver speak one language without dragging UHD headers into the ring, writers, etc.
 //
-// Header-only on purpose (no types.cpp): all helpers are inline. Time helpers use local wall
-// time to match the existing shell output contracts (RunLog.log, events.csv).
+// Header-only on purpose (no types.cpp): all helpers are inline. Time helpers stamp UTC in code
+// (gmtime, not the OS timezone) so filenames, run folders, and log timestamps are deterministic
+// regardless of how the acquisition computer's local zone is configured. Legacy note: seasons
+// captured before this change (2025-26 and earlier) used the Pi's LOCAL clock — the processing
+// side's cfg.capture_tz exists to convert those; new data needs no conversion.
 
 #ifndef CRYOSOOP_COMMON_TYPES_HPP
 #define CRYOSOOP_COMMON_TYPES_HPP
@@ -65,40 +68,42 @@ inline uint64_t host_unix_us() {
             .count());
 }
 
-// Portable, thread-safe-ish local-time breakdown. localtime() itself is not reentrant, so use
-// the platform reentrant variant where available.
-inline std::tm local_tm(std::time_t t) {
+// Portable, thread-safe-ish UTC breakdown. gmtime() itself is not reentrant, so use the
+// platform reentrant variant where available.
+inline std::tm utc_tm(std::time_t t) {
     std::tm out{};
 #if defined(_WIN32)
-    ::localtime_s(&out, &t);
+    ::gmtime_s(&out, &t);
 #elif defined(__unix__) || defined(__APPLE__)
-    ::localtime_r(&t, &out);
+    ::gmtime_r(&t, &out);
 #else
-    out = *std::localtime(&t);
+    out = *std::gmtime(&t);
 #endif
     return out;
 }
 
-// ISO-8601 local time with microsecond fraction: "YYYY-MM-DDTHH:MM:SS.ffffff".
-// Used for the wall_iso column in events.csv.
+// ISO-8601 UTC with microsecond fraction and explicit Z marker:
+// "YYYY-MM-DDTHH:MM:SS.ffffffZ". Used for the wall_iso column in events.csv and the
+// wall_start/wall_end fields of summary.json.
 inline std::string iso_time(uint64_t unix_us) {
     const std::time_t secs = static_cast<std::time_t>(unix_us / 1000000ull);
     const unsigned us = static_cast<unsigned>(unix_us % 1000000ull);
-    const std::tm tmv = local_tm(secs);
+    const std::tm tmv = utc_tm(secs);
     char buf[32];
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tmv);
     char out[48];
-    std::snprintf(out, sizeof(out), "%s.%06u", buf, us);
+    std::snprintf(out, sizeof(out), "%s.%06uZ", buf, us);
     return out;
 }
 
 inline std::string iso_now() { return iso_time(host_unix_us()); }
 
-// Compact filename stamp: "%Y%m%d%H%M%S" — matches production `date "+%Y%m%d%H%M%S"` and the
-// radiometer file-naming contract <PREFIX><YYYYMMDDHHmmss>_ch{0,1}.dat.
+// Compact filename stamp: "%Y%m%d%H%M%S" in UTC — matches `date -u "+%Y%m%d%H%M%S"` and the
+// radiometer file-naming contract <PREFIX><YYYYMMDDHHmmss>_ch{0,1}.dat. Deliberately stays
+// 14 digits with no zone marker: every downstream parser matches \d{14}.
 inline std::string stamp_compact(uint64_t unix_us) {
     const std::time_t secs = static_cast<std::time_t>(unix_us / 1000000ull);
-    const std::tm tmv = local_tm(secs);
+    const std::tm tmv = utc_tm(secs);
     char buf[20];
     std::strftime(buf, sizeof(buf), "%Y%m%d%H%M%S", &tmv);
     return buf;
@@ -107,12 +112,13 @@ inline std::string stamp_compact(uint64_t unix_us) {
 inline std::string stamp_now() { return stamp_compact(host_unix_us()); }
 
 // Per-run folder stamps. A run's output lands in <root>/<YYYYMMDD>/<HHMMSS>/, split into a date
-// folder and a time folder so successive runs group by day. Local time, matching the capture
-// filename convention (stamp_compact / local_tm). Sample host_unix_us() ONCE and pass the same
-// value to both so a run that straddles midnight does not split across two date folders.
+// folder and a time folder so successive runs group by day. UTC, matching the capture
+// filename convention (stamp_compact / utc_tm) — day boundaries are UTC midnight. Sample
+// host_unix_us() ONCE and pass the same value to both so a run that straddles midnight does not
+// split across two date folders.
 inline std::string date_folder(uint64_t unix_us) {
     const std::time_t secs = static_cast<std::time_t>(unix_us / 1000000ull);
-    const std::tm tmv = local_tm(secs);
+    const std::tm tmv = utc_tm(secs);
     char buf[16];
     std::strftime(buf, sizeof(buf), "%Y%m%d", &tmv);
     return buf;
@@ -120,14 +126,14 @@ inline std::string date_folder(uint64_t unix_us) {
 
 inline std::string time_folder(uint64_t unix_us) {
     const std::time_t secs = static_cast<std::time_t>(unix_us / 1000000ull);
-    const std::tm tmv = local_tm(secs);
+    const std::tm tmv = utc_tm(secs);
     char buf[16];
     std::strftime(buf, sizeof(buf), "%H%M%S", &tmv);
     return buf;
 }
 
 // Collision-free capture stamp. Capture files are named
-// <save_root>/<prefix><stamp>_ch{k}.dat with a 14-digit whole-second local stamp (stamp_compact),
+// <save_root>/<prefix><stamp>_ch{k}.dat with a 14-digit whole-second UTC stamp (stamp_compact),
 // so two captures inside the same wall-clock second would silently collide (only possible if a
 // config sets duration_s < 1 s). Start from the current host time and, while a ch0 file with the
 // candidate stamp already exists, advance the candidate by +1 s and re-format. Bounded at 60

@@ -10,6 +10,9 @@
 #                       dependency.
 #   * cryosoop        — executable from src/main.cpp + radiometer_driver.cpp. Built only if
 #                       src/main.cpp exists.
+#   * cryosoop_tests  — UHD-free check binary from tests/*.cpp (timestamp/summary contracts).
+#                       Built whenever tests/ exists, including under CRYOSOOP_COMMON_ONLY;
+#                       run via ctest or directly.
 #
 # Options:
 #   CRYOSOOP_COMMON_ONLY=ON  skip UHD entirely and build only cryosoop_common. Use this for the
@@ -103,4 +106,15 @@ if(NOT CRYOSOOP_COMMON_ONLY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
         cryosoop_common ${UHD_LIBRARIES} ${CRYOSOOP_YAMLCPP} Threads::Threads)
 else()
     message(STATUS "CryoSoOp: src/main.cpp not present (or COMMON_ONLY) — building cryosoop_common only.")
+endif()
+
+# ---------------------------------------------------------------- cryosoop_tests (if present)
+# UHD-free contract checks (UTC timestamp helpers, summary.json emission). Deliberately built in
+# every configuration — including CRYOSOOP_COMMON_ONLY — so the MSVC compile-check host can run
+# them, not just the Pi.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_stamps.cpp")
+    enable_testing()
+    add_executable(cryosoop_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_stamps.cpp")
+    target_link_libraries(cryosoop_tests PRIVATE cryosoop_common)
+    add_test(NAME time_stamps COMMAND cryosoop_tests)
 endif()

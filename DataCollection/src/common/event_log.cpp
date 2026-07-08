@@ -53,11 +53,12 @@ std::string thread_tag() {
     return ss.str();
 }
 
-// "HH:MM:SS.ff" local time with centisecond fraction (matches RunLog.log convention).
+// "HH:MM:SS.ff" UTC with centisecond fraction (matches RunLog.log convention; UTC like every
+// other wall-clock stamp — see types.hpp header note).
 std::string clock_hhmmss_ff(uint64_t unix_us) {
     const std::time_t secs = static_cast<std::time_t>(unix_us / 1000000ull);
     const unsigned cs = static_cast<unsigned>((unix_us % 1000000ull) / 10000ull);  // centiseconds
-    const std::tm tmv = local_tm(secs);
+    const std::tm tmv = utc_tm(secs);
     char buf[16];
     std::strftime(buf, sizeof(buf), "%H:%M:%S", &tmv);
     char out[24];
