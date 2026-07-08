@@ -1,10 +1,12 @@
 #!/bin/sh
 # bbb_set_state.sh -- set + VERIFY the BeagleBone cal-switch GPIO state.
 #
-# SINGLE SOURCE OF TRUTH for the BBB host address, cal-switch GPIO pins, per-state pin
-# values, and ssh hardening options. config/radiometer_B210.yaml's state_cmd /
-# final_state_cmd hooks call this script by absolute path, so changing the IP or pins
-# means editing ONLY the settings block below -- never the YAML.
+# The BBB host address, cal-switch GPIO pins, and per-state pin values are per-site
+# settings: set them in config/site.env (radiometer_run.sh sources + exports it, and this
+# script -- run from cryosoop's exec_hook -- inherits the values). The defaults below only
+# apply when the corresponding variable is not in the environment. config/radiometer_B210.yaml's
+# state_cmd / final_state_cmd hooks call this script by absolute path, so changing the IP
+# or pins means editing ONLY site.env -- never the YAML.
 #
 # Install on the radiometer Pi (once per Pi, and again whenever this file changes):
 #   sudo install -m 0755 orchestration/bbb_set_state.sh /usr/local/bin/bbb_set_state.sh
@@ -21,16 +23,19 @@
 # ConnectTimeout + ServerAlive* make a dead/unreachable/password-prompting BBB fail fast
 # instead of hanging exec_hook until the wrapper's whole-run timeout.
 #
-# Env overrides: BBB_HOST [root@192.168.1.101], BBB_CONNECT_TIMEOUT [15]
+# Env overrides (all of them normally come from config/site.env via radiometer_run.sh):
+#   BBB_HOST [root@192.168.1.101], BBB_CONNECT_TIMEOUT [15],
+#   GPIO_PINS [49 115 27], NL_VALS [0 0 0], L_VALS [0 0 1], SIGNAL_VALS [1 1 0]
+# Bench use without the wrapper:  set -a; . config/site.env; set +a; bbb_set_state.sh NL
 
 set -u
 
-# ---- single-location settings (edit here, nowhere else) -----------------------------------
+# ---- defaults (per-site values belong in config/site.env, not here) -----------------------
 BBB_HOST="${BBB_HOST:-root@192.168.1.101}"
-GPIO_PINS="49 115 27"     # order matters: per-state values below are per-pin in this order
-NL_VALS="0 0 0"           # NL (Noise+Load)
-L_VALS="0 0 1"            # L  (Load)
-SIGNAL_VALS="1 1 0"       # Signal (also the end-of-run restore state)
+GPIO_PINS="${GPIO_PINS:-49 115 27}"       # order matters: per-state values are per-pin in this order
+NL_VALS="${NL_VALS:-0 0 0}"               # NL (Noise+Load)
+L_VALS="${L_VALS:-0 0 1}"                 # L  (Load)
+SIGNAL_VALS="${SIGNAL_VALS:-1 1 0}"       # Signal (also the end-of-run restore state)
 BBB_CONNECT_TIMEOUT="${BBB_CONNECT_TIMEOUT:-15}"
 # --------------------------------------------------------------------------------------------
 

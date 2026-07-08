@@ -22,7 +22,9 @@ DEVICE:
 
 ### FILE LOCATIONS
 FILES:
-    save_loc: "/mnt/snowData/SDR/Data/"  # production capture tree (rsync-pulled)
+    save_loc: "/mnt/snowData/SDR/Data/"  # fallback only: in production radiometer_run.sh passes
+                                         # --save-loc $DATA_DIR (from config/site.env), which
+                                         # overrides this value. Edit site.env, not here.
 
 ### RADIOMETER SEQUENCE
 RADIOMETER:

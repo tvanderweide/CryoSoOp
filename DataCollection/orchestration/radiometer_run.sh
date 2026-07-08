@@ -32,7 +32,15 @@
 # events.csv / RunLog.log / config_effective.yaml / summary.json (no cross-run append or
 # overwrite). So each two-hourly cron run lands in its own dated subfolder under DATA_DIR.
 #
-# Env overrides (all optional):
+# SITE CONFIGURATION: per-site values live in <project>/config/site.env (sourced and
+# exported below, so cryosoop's exec_hook children -- bbb_set_state.sh -- inherit the
+# BBB_* / GPIO_PINS / *_VALS settings too). Edit THAT file for a new deployment; the
+# in-script defaults below only apply when site.env is absent. Because site.env
+# assignments override any environment set on the crontab line, a one-off manual
+# override needs the site file skipped: SITE_ENV=/dev/null DATA_DIR=... radiometer_run.sh
+#
+# Variables (defaults used when site.env is absent):
+#   SITE_ENV        site settings file          [<project>/config/site.env]
 #   MOUNT           data mount point            [/mnt/snowData]
 #   DATA_DIR        capture output dir          [/mnt/snowData/SDR/Data]
 #   MIN_FREE_GB     minimum free space (GB)     [8]
@@ -52,6 +60,15 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Per-site settings (exported so cryosoop's exec_hook children inherit the BBB_* values).
+SITE_ENV="${SITE_ENV:-${PROJECT_DIR}/config/site.env}"
+if [ -f "$SITE_ENV" ]; then
+  set -a
+  # shellcheck source=../config/site.env
+  . "$SITE_ENV"
+  set +a
+fi
 
 MOUNT="${MOUNT:-/mnt/snowData}"
 DATA_DIR="${DATA_DIR:-/mnt/snowData/SDR/Data}"
