@@ -48,7 +48,7 @@ Defaults below are the in-code struct defaults (`config.hpp`). The shipped
 
 | Key | Type | Default | Consumer | Notes |
 |---|---|---|---|---|
-| `save_loc` | string | `data/B210/` | main | Acquisition root used when `--save-loc` is not given. In **both** cases the binary creates a per-run subfolder `<root>/<YYYYMMDD>/<HHMMSS>/` (local time) under the root and writes that run's `.dat` files, `events.csv`, `RunLog.log`, `config_effective.yaml`, and `summary.json` there — nothing appends/overwrites across runs. `--save-loc` overrides `save_loc` as the root (it is no longer used verbatim); in production `radiometer_run.sh` always passes `--save-loc $DATA_DIR` from `config/site.env`, so per-site path changes go in site.env, not this key. Shipped config: `/mnt/snowData/SDR/Data/`. |
+| `save_loc` | string | `data/B210/` | main | Acquisition root used when `--save-loc` is not given. In **both** cases the binary creates a per-run subfolder `<root>/<YYYYMMDD>/<HHMMSS>/` (UTC) under the root and writes that run's `.dat` files, `events.csv`, `RunLog.log`, `config_effective.yaml`, and `summary.json` there — nothing appends/overwrites across runs. `--save-loc` overrides `save_loc` as the root (it is no longer used verbatim); in production `radiometer_run.sh` always passes `--save-loc $DATA_DIR` from `config/site.env`, so per-site path changes go in site.env, not this key. Shipped config: `/mnt/snowData/SDR/Data/`. |
 
 ## RING
 

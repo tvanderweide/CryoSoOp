@@ -182,16 +182,20 @@ headroom (the ring is clamped to `MemAvailable − 1 GiB` on Linux).
 
 ## Output contract
 
-Every run creates its own **per-run folder** `<root>/<YYYYMMDD>/<HHMMSS>/` (local time), where
+Every run creates its own **per-run folder** `<root>/<YYYYMMDD>/<HHMMSS>/` (UTC), where
 `<root>` is the `--save-loc` value if given, else `FILES.save_loc`. That run folder holds the
 per-channel `.dat` captures plus `events.csv`, `RunLog.log`, `config_effective.yaml`, and
 `summary.json` — all scoped to the single run, so nothing appends or overwrites across runs.
 
 Per-channel chunked `.dat` files (`sc16`, interleaved int16 I/Q) are named
 `<PREFIX><YYYYmmddHHMMSS>_ch{0,1}.dat` with the configured sequence prefixes (`UHF__NL_`, `UHF__L_`,
-`UHF_`), rotated every `RADIOMETER.chunk_secs`. The filename stamp is a 14-digit whole-second local
-timestamp guarded against same-second collisions (the driver advances it a second at a time if a
-file with that stamp already exists). Capture stop is by exact sample count (`duration_s * rate`),
+`UHF_`), rotated every `RADIOMETER.chunk_secs`. The filename stamp is a 14-digit whole-second
+**UTC** timestamp guarded against same-second collisions (the driver advances it a second at a
+time if a file with that stamp already exists). All wall-clock stamps — filenames, run folders,
+`events.csv`'s `wall_iso` column and `summary.json`'s `wall_start`/`wall_end` (both ISO-8601 with
+a trailing `Z`), and `RunLog.log` prefixes — are formatted in UTC in code, independent of the OS
+timezone; `summary.json` records `"wall_clock": "UTC"` so downstream tooling can tell UTC runs
+from legacy local-time data. Capture stop is by exact sample count (`duration_s * rate`),
 which fixes the old `rx_samples_to_file` 0.05 s wall-clock truncation. Exit code `0` = clean,
 `1` = completed with logged errors (dropped chunks — data still usable), `2` = fatal/aborted.
 `events.csv` is the canonical event log (self-describing header row, checked by
@@ -244,11 +248,13 @@ deployment's hardware, network, and storage lives in **one file: `config/site.en
    cal switch (`BBB_HOST`, `GPIO_PINS`, per-state `NL_VALS`/`L_VALS`/`SIGNAL_VALS`).
    Keep `REBOOT_ON_FAIL=0` until bench bring-up is complete. Run `probe_nvme.sh`
    standalone against the new drive before trusting it.
-2. **System clock timezone** — capture filenames and run folders use the acquisition computer's
-   **local** clock. Set the OS timezone deliberately (`sudo timedatectl set-timezone <IANA zone>`,
-   verify with `timedatectl`) and record it: the processing pipeline's `site_config.json`
-   `capture_tz` must name the same zone (see `Processing/README.md`, "Deploying at a new site")
-   or every satellite-geometry product misaligns by the UTC offset.
+2. **System clock** — capture filenames and run folders are stamped in **UTC in code**, so the
+   OS timezone setting no longer affects the data; set it to whatever is convenient for field
+   work, but do verify the clock is NTP-synced (`timedatectl show-timesync`). On the processing
+   side, `site_config.json` `capture_tz` must be `"UTC"` for data from this binary (its
+   local-zone form exists only for legacy pre-UTC seasons — see `Processing/README.md`,
+   "Deploying at a new site"). Never mix UTC-era and legacy local-time runs under one data root:
+   `capture_tz` applies to the whole tree.
 3. **BeagleBone SSH + install** — set up passwordless SSH from the acquisition machine to the
    BBB (`bbb_set_state.sh` runs with `BatchMode=yes`, so a password prompt is a hard failure),
    then install the helper where the YAML hooks expect it:
