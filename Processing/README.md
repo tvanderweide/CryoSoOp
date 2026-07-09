@@ -169,7 +169,13 @@ Dispatched in order by `soop_run_pipeline`:
    coefficients).
 3. **compute_rfi_spectrum** — season-wide diagnostic: aggregates PSD,
    spectral occupancy, spectral kurtosis, and inter-channel coherence across
-   sample captures, and proposes RFI excision bands.
+   sample captures, and proposes RFI excision bands. Runs once per dataset —
+   Signal, NL (noise+load), and L (load-only) — writing
+   `rfi_spectrum{,_NL,_L}.csv`/`.png` and `rfi_bands_proposed{,_NL,_L}.csv`.
+   NL/L band-finding is PSD-excess only (no spectral-kurtosis gate). The curated
+   band files applied downstream are `rfi_bands.csv` (signal, compute_L1) and
+   `rfi_bands_NL.csv` / `rfi_bands_L.csv` (per calibration state, compute_calib);
+   a missing calibration band file leaves that state unexcised.
 4. **compute_snr** — SNR distribution across the season; a candidate
    detection threshold.
 5. **compare_sat_candidates** scores candidate MUOS satellites against the
@@ -205,9 +211,20 @@ utility helpers).
 ## Testing
 
 MATLAB unit tests for the RFI excision path live in `tests/`
-(`rfi_excise_test.m`, `rfi_propose_bands_test.m`); run them with
-`runtests('tests')` from the `Processing/` folder. All pipeline code is
-additionally kept `checkcode`-clean.
+(`rfi_excise_test.m`, `rfi_propose_bands_test.m`). Run `soop_setup_paths`
+first so the `rfi/`, `stages/`, and `lib/` folders are on the path, then from
+the `Processing/` folder:
+
+```matlab
+soop_setup_paths;
+runtests('tests')                          % functiontests suites (rfi_propose_bands_test)
+addpath('tests');  ok = rfi_excise_test();  assert(ok)   % function-style phase-safety test
+```
+
+`runtests('tests')` runs the `functiontests`-style suites and skips
+`rfi_excise_test.m`, which is a plain function (not a `functiontests` file); it
+returns a PASS/FAIL logical, so it is called directly (with `tests/` on the
+path). All pipeline code is additionally kept `checkcode`-clean.
 
 ## Further reading
 

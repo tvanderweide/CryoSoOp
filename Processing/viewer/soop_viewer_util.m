@@ -25,6 +25,7 @@ function U = soop_viewer_util()
     U.raw_cap_title = @raw_cap_title;
     U.plot_uses_method = @plot_uses_method;
     U.prep_excis = @prep_excis;
+    U.rfi_dataset_info = @rfi_dataset_info;
     U.plot_series = @plot_series;
     U.tcol = @tcol;
     U.src_desc = @src_desc;
@@ -483,14 +484,61 @@ end
 
 function excis = prep_excis(V, seg_len, method)
     cfg = V.cfg;
-    Erfi = V.Erfi;
     % Build the rfi_excise operator for this FFT length and the SELECTED
     % method only (independent of the session's cfg.rfi_methods). Building
     % just the one operator matters at the 18M-pt xcorr FFT, where each
     % operator is tens of MB. Only called for non-'none' methods.
+    %
+    % Per-dataset bands: the live notch/filter of a raw capture uses the same
+    % band set the pipeline would apply to that capture type (Signal ->
+    % cfg.rfi_bands, NL -> cfg.rfi_bands_nl, L -> cfg.rfi_bands_l, missing ->
+    % empty = pass-through), so the viewer's "w/ Notch" preview matches the
+    % _notch products. Only affects live raw filtering; product-CSV views read
+    % already-written output dirs and are unchanged.
+    bands = rfi_dataset_bands(cfg, char(V.dd_ctype.Value));
     cfgp = cfg;
     cfgp.rfi_methods = {method};
-    excis = Erfi.prepare(cfgp, seg_len);
+    excis = rfi_prepare_bands(cfgp, bands, seg_len);
+end
+
+
+function bands = rfi_dataset_bands(cfg, ctype)
+    % Band list for a capture type (Signal/NL/L) with an empty fallback.
+    switch ctype
+        case 'NL', fld = 'rfi_bands_nl';
+        case 'L',  fld = 'rfi_bands_l';
+        otherwise, fld = 'rfi_bands';
+    end
+    if isfield(cfg, fld) && ~isempty(cfg.(fld)), bands = cfg.(fld); else, bands = zeros(0,2); end
+end
+
+
+function info = rfi_dataset_info(V, name)
+    % Resolve the season-RFI 'RFI set' selector (Signal/NL/L) to the files it
+    % drives, so rfi_explorer, rfi_filter_psd, and on_rfi_export cannot drift.
+    %   .name      display/selector name
+    %   .sfx       CSV/PNG/proposed-file suffix ('' / '_NL' / '_L')
+    %   .spectrum  season spectrum CSV basename (rfi_spectrum<sfx>.csv)
+    %   .proposed  export target basename (rfi_bands_proposed<sfx>.csv)
+    %   .curated   curated band CSV this set feeds (rfi_bands[...].csv)
+    %   .use_sk    whether the SK gate applies (Signal only)
+    if nargin < 2 || isempty(name)
+        if isprop(V, 'rfi_dataset') && ~isempty(V.rfi_dataset)
+            name = char(V.rfi_dataset.Value);
+        else
+            name = 'Signal';
+        end
+    end
+    switch char(name)
+        case 'NL', sfx = '_NL'; curated = 'rfi_bands_NL.csv';
+        case 'L',  sfx = '_L';  curated = 'rfi_bands_L.csv';
+        otherwise, name = 'Signal'; sfx = ''; curated = 'rfi_bands.csv';
+    end
+    info = struct('name', name, 'sfx', sfx, ...
+                  'spectrum', ['rfi_spectrum' sfx '.csv'], ...
+                  'proposed', ['rfi_bands_proposed' sfx '.csv'], ...
+                  'curated', curated, ...
+                  'use_sk', strcmp(name, 'Signal'));
 end
 
 

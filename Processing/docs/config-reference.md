@@ -19,7 +19,7 @@ Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
 | Field | Set to | Consumed by |
 |---|---|---|
 | `cfg.data_dir` | Raw `.dat` capture folder (HPC: `/bsuscratch/.../Data/`; local: `F:\Data\`, ~95% of season raw data). Discovered recursively (`dir(fullfile(cfg.data_dir, '**', '<pattern>'))`), so this may point at either a legacy flat directory of `.dat` files or a cryosoop `<DATA_ROOT>` containing nested `<YYYYMMDD>/<HHMMSS>/` run folders — see `Processing/README.md#dual-format-support-legacy-flat-vs-cryosoop-per-run` | compute_L1, compute_calib, compute_rfi_spectrum |
-| `cfg.input_dir` | STABLE season inputs shared by every dated run — `overflow_timestamps.txt`, `muos_elevation_*.csv`, `rfi_bands.csv` — decoupled from the per-run output dir, so a new dated run only changes `cfg.out_dir` | compute_calib, compute_snr, compare_sat_candidates, compute_L2, compute_rfi_spectrum |
+| `cfg.input_dir` | STABLE season inputs shared by every dated run — `overflow_timestamps.txt`, `muos_elevation_*.csv`, the curated band CSVs `rfi_bands.csv` / `rfi_bands_NL.csv` / `rfi_bands_L.csv`, and the season RFI products `rfi_spectrum{,_NL,_L}.csv` / `.png` + `rfi_bands_proposed{,_NL,_L}.csv` — decoupled from the per-run output dir, so a new dated run only changes `cfg.out_dir` | compute_calib, compute_snr, compare_sat_candidates, compute_L2, compute_rfi_spectrum |
 | `cfg.out_dir` (as first set) | The dated run ROOT (e.g. `...\2026-06-24\`) — the one thing to edit per re-run | re-derived below, not read directly |
 | `cfg.fig_dir` | `<root>\Figures\` — re-derived from `cfg.out_dir` before the L1-leaf rewrite; viewer "Export PNG" target | viewer |
 | `cfg.out_dir` (final, re-derived) | `<root>\L1\` — the L1/base product leaf. `rfi_excise.method_out_dir()` string-suffixes this leaf name, so `'notch_interp'` lands in a sibling `L1_notch\` folder inside the same dated root | every stage |
@@ -90,9 +90,11 @@ and phase-safety.
 |---|---|---|
 | `cfg.rfi_methods` | `{'notch_interp'}`, prepended with `'none'` when `update_base = true` (the entry script's local variable, not itself a `cfg` field) | `update_base` also (re)processes the base/`'none'` set in `cfg.out_dir` alongside the excised sets — safe, because the per-method incremental logic adds only genuinely new captures (no duplication). Set `update_base = false` to leave the base frozen |
 | `cfg.rfi_bands_file` | `fullfile(cfg.input_dir, 'rfi_bands.csv')` | the curated season band list, exported from the viewer's RFI explorer ("Export bands" -> `rfi_bands_proposed.csv`; rename/copy to `rfi_bands.csv`, both in `cfg.input_dir`/Static). This CSV is the single source of truth — edit it (incl. the ~360/380 MHz edge bands) rather than hardcoding bands in the entry script. Columns: `f_lo_hz, f_hi_hz(, source)`. If missing, a warning is logged and `cfg.rfi_bands = []` (notch becomes a no-op, behaves like `'none'`) |
-| `cfg.rfi_bands` | `[B.f_lo_hz, B.f_hi_hz]`, N x 2, RF Hz | loaded from `cfg.rfi_bands_file` |
+| `cfg.rfi_bands` | `[B.f_lo_hz, B.f_hi_hz]`, N x 2, RF Hz | loaded from `cfg.rfi_bands_file`; the **Signal** band list — applied to signal captures (compute_L1) |
+| `cfg.rfi_bands_nl` | `[B.f_lo_hz, B.f_hi_hz]`, N x 2, RF Hz | loaded from `rfi_bands_NL.csv` in `cfg.input_dir`; applied to **NL** (noise+load) calibration captures (compute_calib). **Missing file -> `zeros(0,2)`: NL calibration runs UNEXCISED** (empty band list is a pass-through), not a fall-back to the signal bands. Same columns as `rfi_bands.csv` |
+| `cfg.rfi_bands_l` | `[B.f_lo_hz, B.f_hi_hz]`, N x 2, RF Hz | loaded from `rfi_bands_L.csv` in `cfg.input_dir`; applied to **L** (load-only) calibration captures (compute_calib). Missing file -> `zeros(0,2)`: L calibration runs UNEXCISED. Same columns as `rfi_bands.csv` |
 | `cfg.muos_bands` | N x 2 RF Hz, see below | |
-| `cfg.rfi_apply_calib` | `true` | also excise calibration captures, for consistency with signal captures |
+| `cfg.rfi_apply_calib` | `true` | also excise calibration captures. With per-state band files, NL uses `cfg.rfi_bands_nl` and L uses `cfg.rfi_bands_l` (each independent of the signal `cfg.rfi_bands`) |
 
 **cfg.muos_bands** — the four MUOS WCDMA downlink channels (360-380 MHz, 5 MHz
 spacing, centers 362.5/367.5/372.5/377.5 MHz; guard nulls at 365/370/375 MHz —
@@ -113,7 +115,20 @@ cfg.muos_bands = 1e6 * [ ...
 
 **Band-finder fields** (compute_rfi_spectrum + the viewer's interactive
 explorer) — these seed the explorer's controls; tune them live there, then
-Export to `rfi_bands.csv`:
+Export to the per-dataset proposed CSV and curate into the matching band file
+(`rfi_bands.csv` for Signal, `rfi_bands_NL.csv` / `rfi_bands_L.csv` for the
+calibration states).
+
+**Per-dataset RFI (Signal / NL / L).** `compute_rfi_spectrum` aggregates three
+datasets — signal captures, NL (noise+load) and L (load-only) calibration
+captures — into `rfi_spectrum{,_NL,_L}.csv` + `.png` and
+`rfi_bands_proposed{,_NL,_L}.csv` (all in `cfg.input_dir`). The viewer's two
+season-RFI views carry an **RFI set** selector (Signal/NL/L) that switches which
+spectrum/bands are shown. **NL and L band-finding uses the PSD-excess gate only
+— the SK gate (`cfg.rfi_sk_threshold`, `cfg.rfi_use_sk`) is forced off for those
+sets** (SK is still computed, written to the CSV, and plotted as a diagnostic);
+only the Signal set uses SK. The curated band files are independent per state,
+so a band that applies to more than one dataset is duplicated across files.
 
 **Corrected 2026-07-06**: the "Entry value" column below previously showed
 the compute_rfi_spectrum/viewer *fallback* defaults for several fields, not

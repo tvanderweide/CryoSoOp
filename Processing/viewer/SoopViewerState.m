@@ -89,6 +89,7 @@ classdef SoopViewerState < handle
         btn_next
         lbl_cap
         rfi_row
+        rfi_dataset
         rfi_excess
         rfi_sk
         rfi_gap

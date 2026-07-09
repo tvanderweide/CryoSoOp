@@ -365,10 +365,16 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
     n_samps_l  = numel(E_DL);
 
     % Excision operators + spectra (only when a non-none method is requested).
+    % Per-calibration-state bands: NL captures use cfg.rfi_bands_nl, L uses
+    % cfg.rfi_bands_l (rfi_prepare_bands swaps cfg.rfi_bands per state; an empty
+    % list for a state -> pass-through, so that state runs unexcised). NL/L no
+    % longer share the signal band list.
     Pn = []; Pl = []; F_DNS = []; F_RNS = []; F_DL = []; F_RL = [];
     if any(~strcmp(methods, 'none'))
-        Pn = rfi_excise().prepare(cfg, numel(E_DNS));
-        Pl = rfi_excise().prepare(cfg, numel(E_DL));
+        bands_nl = getfield_default(cfg, 'rfi_bands_nl', zeros(0,2));
+        bands_l  = getfield_default(cfg, 'rfi_bands_l',  zeros(0,2));
+        Pn = rfi_prepare_bands(cfg, bands_nl, numel(E_DNS));
+        Pl = rfi_prepare_bands(cfg, bands_l,  numel(E_DL));
         F_DNS = fft(E_DNS);  F_RNS = fft(E_RNS);
         F_DL  = fft(E_DL);   F_RL  = fft(E_RL);
     end
@@ -388,10 +394,15 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
     % computed exactly as compute_L1 does for signal captures, for the NL and L
     % captures separately and per RFI method. Calibration carries no sky signal,
     % so this isolates the instrumental ch0/ch1 delay. Diagnostic only.
-    npts_l  = floor(cfg.fs * cfg.Ti);
-    P_lag   = rfi_excise().prepare(cfg, npts_l);
-    nl_lags = peak_lags_all(E_DNS, E_RNS, npts_l, cfg.num_segs, cfg.lag_half_win, methods, apply_rfi, P_lag);
-    l_lags  = peak_lags_all(E_DL,  E_RL,  npts_l, cfg.num_segs, cfg.lag_half_win, methods, apply_rfi, P_lag);
+    % Per-state excision operators (same per-state bands as the calibration
+    % path above), so the lag diagnostic excises NL/L with their own bands.
+    npts_l    = floor(cfg.fs * cfg.Ti);
+    bands_nl  = getfield_default(cfg, 'rfi_bands_nl', zeros(0,2));
+    bands_l   = getfield_default(cfg, 'rfi_bands_l',  zeros(0,2));
+    P_lag_nl  = rfi_prepare_bands(cfg, bands_nl, npts_l);
+    P_lag_l   = rfi_prepare_bands(cfg, bands_l,  npts_l);
+    nl_lags = peak_lags_all(E_DNS, E_RNS, npts_l, cfg.num_segs, cfg.lag_half_win, methods, apply_rfi, P_lag_nl);
+    l_lags  = peak_lags_all(E_DL,  E_RL,  npts_l, cfg.num_segs, cfg.lag_half_win, methods, apply_rfi, P_lag_l);
 
     for mi = 1:nMeth
         m = methods{mi};

@@ -339,10 +339,21 @@ function render_now(V)
     set([S.cb_depth, S.cb_airtc, S.cb_tempc], ...
         'Visible', matlab.lang.OnOffSwitchState(is_cand));
 
-    % Expand the RFI explorer control row only for the season RFI plot.
-    is_rfi = strcmp(kind, 'Raw: Season RFI spectrum');
-    rh = gl.RowHeight;  rh{3} = is_rfi * 40;  gl.RowHeight = rh;
-    S.rfi_row.Visible = matlab.lang.OnOffSwitchState(is_rfi);
+    % Expand the RFI control row for both season RFI views. The interactive
+    % explorer ('Raw: Season RFI spectrum') uses every control; the
+    % notch-effect view ('Raw: Season PSD — notch effect') shows curated bands,
+    % so only the 'RFI set' selector stays enabled there — the threshold/gap/SK
+    % and Export controls are disabled (rfi_explorer/rfi_filter_psd read the
+    % selector via V.U.rfi_dataset_info).
+    is_explorer = strcmp(kind, 'Raw: Season RFI spectrum');
+    is_notch    = strcmp(kind, 'Raw: Season PSD — notch effect');
+    is_rfi_row  = is_explorer || is_notch;
+    rh = gl.RowHeight;  rh{3} = is_rfi_row * 40;  gl.RowHeight = rh;
+    S.rfi_row.Visible = matlab.lang.OnOffSwitchState(is_rfi_row);
+    tune_en = matlab.lang.OnOffSwitchState(is_explorer);
+    set([S.rfi_excess, S.rfi_sk, S.rfi_gap, S.rfi_gap_ef, S.rfi_usesk, S.btn_rfi_export], ...
+        'Enable', tune_en);
+    S.rfi_dataset.Enable = matlab.lang.OnOffSwitchState(is_rfi_row);
 
     S.last_n = 0;
     delete(S.panel.Children);
@@ -414,25 +425,29 @@ end
 
 function on_rfi_export(V)
     S = V;
-    % Write the currently-highlighted bands to rfi_bands_proposed.csv and
-    % print a paste-ready cfg.rfi_bands snippet to the console.
+    % Write the currently-highlighted bands for the selected 'RFI set' to
+    % rfi_bands_proposed<sfx>.csv (Static) and print a paste-ready snippet to
+    % the console. Curate the reviewed rows into the matching per-dataset
+    % curated CSV (rfi_bands.csv / rfi_bands_NL.csv / rfi_bands_L.csv).
+    info = V.U.rfi_dataset_info(V);
     if isempty(S.rfi_bands)
-        uialert(S.fig, 'No bands at the current thresholds.', 'RFI export');
+        uialert(S.fig, sprintf('No %s bands at the current thresholds.', info.name), ...
+                'RFI export');
         return;
     end
     bands = S.rfi_bands;  src = S.rfi_src;  chan = S.rfi_chan;
     Bt = table(bands(:,1), bands(:,2), src, chan, ...
                'VariableNames', {'f_lo_hz','f_hi_hz','source','channel'});
-    outp = fullfile(S.rfi_dir, 'rfi_bands_proposed.csv');
+    outp = fullfile(S.rfi_dir, info.proposed);
     writetable(Bt, outp);
-    fprintf('\n%% --- %d RFI bands -> %s ---\n', size(bands,1), outp);
-    fprintf('cfg.rfi_bands = [ ...\n');
+    fprintf('\n%% --- %d %s RFI bands -> %s (curate into %s) ---\n', ...
+            size(bands,1), info.name, outp, info.curated);
+    fprintf('%% f_lo_hz, f_hi_hz  (source, channel)\n');
     for i = 1:size(bands,1)
-        fprintf('    %.0f %.0f; ...   %% %s, %s\n', bands(i,1), bands(i,2), src(i), chan(i));
+        fprintf('    %.0f, %.0f   %% %s, %s\n', bands(i,1), bands(i,2), src(i), chan(i));
     end
-    fprintf('];\n');
-    uialert(S.fig, sprintf(['Exported %d bands to rfi_bands_proposed.csv. ' ...
-            'A cfg.rfi_bands snippet was printed to the console.'], size(bands,1)), ...
+    uialert(S.fig, sprintf(['Exported %d %s bands to %s. Curate the reviewed ' ...
+            'rows into %s.'], size(bands,1), info.name, info.proposed, info.curated), ...
             'RFI bands exported', 'Icon', 'success');
 end
 

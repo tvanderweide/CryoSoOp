@@ -126,6 +126,19 @@ else
             'notch will be a no-op (behaves like ''none'').'], cfg.rfi_bands_file);
     cfg.rfi_bands = [];
 end
+% Per-calibration-state bands (compute_calib): NL captures use cfg.rfi_bands_nl, L uses cfg.rfi_bands_l — separate curated CSVs (same columns: f_lo_hz, f_hi_hz). A missing file means that state runs UNEXCISED (empty band list -> pass-through), NOT a fall-back to the signal bands.
+for cal = ["NL" "L"]
+    calfile = fullfile(cfg.input_dir, "rfi_bands_" + cal + ".csv");
+    calfld  = "rfi_bands_" + lower(cal);
+    if isfile(calfile)
+        Bc = readtable(calfile);
+        cfg.(calfld) = [Bc.f_lo_hz, Bc.f_hi_hz];   % N x 2 [f_lo_hz f_hi_hz], RF Hz
+        fprintf('[BrundageSoOp] Loaded %d %s RFI band(s) from %s.\n', size(cfg.(calfld),1), cal, calfile);
+    else
+        cfg.(calfld) = zeros(0,2);                  % no file -> %s captures run unexcised
+        fprintf('[BrundageSoOp] No %s (rfi_bands_%s.csv) — %s calibration runs UNEXCISED.\n', calfile, cal, cal);
+    end
+end
 % --- MUOS sub-channel bands (freq_muos frequency-domain comparison) ---
 % Four MUOS WCDMA downlink channels (360–380 MHz, centers 362.5/367.5/372.5/377.5); compute_L1 evaluates a SECOND phase over ONLY these bins (peak_phase_deg_fd_muos). RF Hz, N x 2 [f_lo_hz f_hi_hz], center ± 2.3 MHz inside each guard null.
 cfg.muos_bands = 1e6 * [ ...

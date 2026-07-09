@@ -1,11 +1,12 @@
 function compute_rfi_spectrum(cfg)
-% Season-aggregated RFI spectrum + proposed excision bands (frequency-domain).
+% Season-aggregated RFI spectra + proposed excision bands (frequency-domain),
+% one product set per dataset: Signal, NL (noise+load), and L (load-only).
 %
 % Persistent narrowband RFI at Brundage shows as spikes standing above the
 % smoothed PSD envelope in essentially every capture. This tool aggregates
-% across an even season-wide sample of signal captures and reports, per FFT
-% bin and per channel: mean PSD (dB); OCCUPANCY (PRIMARY) — fraction of
-% captures whose PSD exceeds a per-capture movmedian baseline by
+% across an even season-wide sample of each dataset's captures and reports,
+% per FFT bin and per channel: mean PSD (dB); OCCUPANCY (PRIMARY) — fraction
+% of captures whose PSD exceeds a per-capture movmedian baseline by
 % cfg.rfi_excess_db (robust to the colored receiver response; matches the
 % by-eye PSD-vs-envelope method); spectral kurtosis (CHECK, reported not
 % gating) — SK = (M+1)/(M-1)*(M*S2/S1^2 - 1), thermal noise -> 1, RFI
@@ -16,26 +17,31 @@ function compute_rfi_spectrum(cfg)
 % Candidate bands come from rfi_propose_bands (the shared band-finder): bins
 % whose mean PSD exceeds the smoothed envelope by >= cfg.rfi_excess_db, UNION
 % bins with spectral kurtosis >= cfg.rfi_sk_threshold (when cfg.rfi_use_sk),
-% outside the protected region, merged into [f_lo,f_hi]. (Occupancy is computed
-% and written to the CSV for offline inspection but is diagnostic-only — it does
+% outside the protected region, merged into [f_lo,f_hi]. The SK gate applies
+% to the Signal dataset only — NL/L band-finding is PSD-excess only (SK is
+% still computed and written as a diagnostic). (Occupancy is computed and
+% written to the CSV for offline inspection but is diagnostic-only — it does
 % NOT gate the proposed bands.) The user confirms the bands from the figure
-% before copying into cfg.rfi_bands (the defensibility safeguard).
+% before curating them into the per-dataset band CSV (the defensibility
+% safeguard): rfi_bands.csv (Signal), rfi_bands_NL.csv, rfi_bands_L.csv.
 %
 % Not incremental — recomputes and overwrites on each run.
-% Outputs (cfg.input_dir, the Static folder): rfi_spectrum.csv, rfi_spectrum.png,
-% rfi_bands_proposed.csv. Season-wide and method-independent, so they live in
-% Static alongside rfi_bands.csv — not in a dated per-run cfg.out_dir.
+% Outputs (cfg.input_dir, the Static folder), per dataset with suffix
+% '' / '_NL' / '_L': rfi_spectrum<sfx>.csv, rfi_spectrum<sfx>.png,
+% rfi_bands_proposed<sfx>.csv. Season-wide and method-independent, so they
+% live in Static alongside the curated band CSVs — not in a dated per-run
+% cfg.out_dir.
 %
 
     % --- Parameters (defaults; override via cfg) ---
     % Aggregation:
-    seg_len     = getdef(cfg, 'rfi_seg_len',      2^16);   % ~305 Hz bins at 20 MS/s
-    n_read      = getdef(cfg, 'rfi_read_samples', 16*seg_len);
-    excess_db   = getdef(cfg, 'rfi_excess_db',    6);      % per-capture occupancy excess (diag)
-    max_caps    = getdef(cfg, 'rfi_max_captures', 500);    % even season subsample
-    base_khz    = getdef(cfg, 'rfi_baseline_khz', 750);    % per-capture occupancy baseline width
+    ap.seg_len   = getdef(cfg, 'rfi_seg_len',      2^16);   % ~305 Hz bins at 20 MS/s
+    ap.n_read    = getdef(cfg, 'rfi_read_samples', 16*ap.seg_len);
+    ap.excess_db = getdef(cfg, 'rfi_excess_db',    6);      % per-capture occupancy excess (diag)
+    ap.max_caps  = getdef(cfg, 'rfi_max_captures', 500);    % even season subsample
+    ap.base_khz  = getdef(cfg, 'rfi_baseline_khz', 750);    % per-capture occupancy baseline width
     % Band-finder (shared with the viewer's interactive explorer; see rfi_propose_bands):
-    bp.excess_db      = excess_db;                              % PSD-excess-above-envelope (dB)
+    bp.excess_db      = ap.excess_db;                           % PSD-excess-above-envelope (dB)
     bp.sk_threshold   = getdef(cfg, 'rfi_sk_threshold',   100); % also flag SK >= this
     bp.use_sk         = getdef(cfg, 'rfi_use_sk',         true);
     bp.env_khz        = getdef(cfg, 'rfi_env_khz',        1000);% envelope movmedian width
@@ -45,17 +51,42 @@ function compute_rfi_spectrum(cfg)
     bp.min_width_khz  = getdef(cfg, 'rfi_min_width_khz',  0.3); % drop narrower runs
     bp.band_pad_khz   = getdef(cfg, 'rfi_band_pad_khz',   1);   % widen each band for the notch
     bp.center_hz      = cfg.freq_hz;
-    fs = cfg.fs;  freq_hz = cfg.freq_hz;
-    df = fs / seg_len;
-    rfi_out = cfg.input_dir;   % Static: season-wide products (not the dated out_dir)
+    ap.fs = cfg.fs;  ap.freq_hz = cfg.freq_hz;
+    ap.df = ap.fs / ap.seg_len;
+    ap.out = cfg.input_dir;   % Static: season-wide products (not the dated out_dir)
+    ap.data_dir = cfg.data_dir;
 
-    % --- Discover + evenly subsample season signal captures ---
+    % --- Datasets: Signal + the two calibration states ---
+    % Filename patterns match the compute_L1/compute_calib discovery
+    % ('UHF__NL_2*' does not match the 'UHF__NLs_*' small sets). NL/L
+    % band-finding is PSD-excess only (use_sk = false); Signal keeps the
+    % cfg-controlled SK gate. An empty dataset is skipped, not fatal.
+    ds = struct( ...
+        'name',   {'Signal',          'NL',                 'L'}, ...
+        'pat',    {'UHF_2*_ch0.dat',  'UHF__NL_2*_ch0.dat', 'UHF__L_2*_ch0.dat'}, ...
+        'sfx',    {'',                '_NL',                '_L'}, ...
+        'use_sk', {bp.use_sk,         false,                false});
+    for di = 1:numel(ds)
+        bpd = bp;  bpd.use_sk = ds(di).use_sk;
+        aggregate_dataset(ds(di), bpd, ap);
+    end
+end
+
+
+% =========================================================================
+function aggregate_dataset(ds, bp, ap)
+% One dataset's season aggregation -> rfi_spectrum<sfx>.{csv,png} +
+% rfi_bands_proposed<sfx>.csv. Identical math for all datasets; only the
+% filename pattern, output suffix, and band-finder SK gate differ.
+
+    % --- Discover + evenly subsample this dataset's season captures ---
     % '**' recurses into the cryosoop <YYYYMMDD>/<HHMMSS>/ per-run subfolders
     % while still matching a legacy flat directory (** matches zero levels);
     % one_capture builds each partner path from the hit's .folder.
-    ch0_files = dir(fullfile(cfg.data_dir, '**', 'UHF_2*_ch0.dat'));
+    ch0_files = dir(fullfile(ap.data_dir, '**', ds.pat));
     if isempty(ch0_files)
-        fprintf('[rfi] No UHF_*_ch0.dat in %s\n', cfg.data_dir);  return;
+        fprintf('[rfi:%s] No %s in %s — skipped.\n', ds.name, ds.pat, ap.data_dir);
+        return;
     end
     M0    = BrundageSoOp_fun();
     bases = string(erase({ch0_files.name}', '_ch0.dat'));
@@ -63,16 +94,16 @@ function compute_rfi_spectrum(cfg)
     [~, ord] = sort(ts);
     ch0_files = ch0_files(ord);  bases = bases(ord);
     nAll = numel(ch0_files);
-    if nAll > max_caps
-        pick = round(linspace(1, nAll, max_caps));
+    if nAll > ap.max_caps
+        pick = round(linspace(1, nAll, ap.max_caps));
         ch0_files = ch0_files(pick);  bases = bases(pick);
     end
     nC = numel(ch0_files);
-    fprintf('[rfi] Aggregating %d of %d captures, seg_len=%d (%.0f Hz bins).\n', ...
-            nC, nAll, seg_len, df);
+    fprintf('[rfi:%s] Aggregating %d of %d captures, seg_len=%d (%.0f Hz bins).\n', ...
+            ds.name, nC, nAll, ap.seg_len, ap.df);
 
     % --- Accumulators (fftshifted bin order, length seg_len) ---
-    L = seg_len;
+    L = ap.seg_len;
     w = M0.hann_win(L);  wpow = w' * w;
     A0 = zeros(L,1); A1 = zeros(L,1);   % sum |X|^2  (= S1 for SK; autospectra)
     Q0 = zeros(L,1); Q1 = zeros(L,1);   % sum |X|^4  (S2 for SK)
@@ -93,6 +124,7 @@ function compute_rfi_spectrum(cfg)
     % captures at once. (Holding the full nbins*captures slice for every stat is
     % the memory bound noted in the task; the chunking keeps peak use modest.)
     files = ch0_files;  bnames = bases;
+    n_read = ap.n_read;  excess_db = bp.excess_db;  base_khz = ap.base_khz;  df = ap.df;
     chunk_sz = min(nC, 64);
     for c0 = 1:chunk_sz:nC
         cidx = c0:min(c0 + chunk_sz - 1, nC);
@@ -120,14 +152,16 @@ function compute_rfi_spectrum(cfg)
         Mtot = Mtot + sum(msc);    Ncap = Ncap + sum(msc > 0);
     end
     if Ncap == 0 || Mtot < 3
-        fprintf('[rfi] No usable captures/segments — aborted.\n');  return;
+        fprintf('[rfi:%s] No usable captures/segments — skipped.\n', ds.name);
+        return;
     end
+    fprintf('[rfi:%s] Aggregated %d capture(s), %d segment(s).\n', ds.name, Ncap, Mtot);
 
     % --- Derived spectra (fftshifted; RF frequency axis) ---
     f_bb   = ((-L/2):(L/2-1))' * df;
-    f_rf   = f_bb + freq_hz;
-    psd0_db = 10*log10( (A0/Mtot) / (fs*wpow) );
-    psd1_db = 10*log10( (A1/Mtot) / (fs*wpow) );
+    f_rf   = f_bb + ap.freq_hz;
+    psd0_db = 10*log10( (A0/Mtot) / (ap.fs*wpow) );
+    psd1_db = 10*log10( (A1/Mtot) / (ap.fs*wpow) );
     sk0 = (Mtot+1)/(Mtot-1) * (Mtot*Q0./A0.^2 - 1);
     sk1 = (Mtot+1)/(Mtot-1) * (Mtot*Q1./A1.^2 - 1);
     coh = abs(X01).^2 ./ max(A0.*A1, eps);
@@ -137,32 +171,36 @@ function compute_rfi_spectrum(cfg)
     [bands_rf, band_src, band_chan] = rfi_propose_bands(f_rf, psd0_db, psd1_db, sk0, sk1, bp);
 
     % --- Write CSV products ---
-    if ~isfolder(rfi_out), mkdir(rfi_out); end
+    if ~isfolder(ap.out), mkdir(ap.out); end
     T = table(f_rf, psd0_db, psd1_db, occ0, occ1, sk0, sk1, coh, ...
         'VariableNames', {'freq_hz','psd_db_ch0','psd_db_ch1', ...
                           'occupancy_ch0','occupancy_ch1','sk_ch0','sk_ch1','coherence'});
-    writetable(T, fullfile(rfi_out, 'rfi_spectrum.csv'));
+    writetable(T, fullfile(ap.out, ['rfi_spectrum' ds.sfx '.csv']));
 
     if isempty(bands_rf)
-        fprintf('[rfi] No bands proposed at the current thresholds.\n');
+        fprintf('[rfi:%s] No bands proposed at the current thresholds.\n', ds.name);
         Bt = table('Size',[0 4],'VariableTypes',{'double','double','string','string'}, ...
                    'VariableNames',{'f_lo_hz','f_hi_hz','source','channel'});
     else
         Bt = table(bands_rf(:,1), bands_rf(:,2), band_src, band_chan, ...
                    'VariableNames',{'f_lo_hz','f_hi_hz','source','channel'});
-        fprintf('[rfi] %d candidate band(s) (PSD-excess >= %g dB OR SK >= %g):\n', ...
-                size(bands_rf,1), bp.excess_db, bp.sk_threshold);
+        if bp.use_sk
+            gate = sprintf('PSD-excess >= %g dB OR SK >= %g', bp.excess_db, bp.sk_threshold);
+        else
+            gate = sprintf('PSD-excess >= %g dB, no SK', bp.excess_db);
+        end
+        fprintf('[rfi:%s] %d candidate band(s) (%s):\n', ds.name, size(bands_rf,1), gate);
         for i = 1:size(bands_rf,1)
             fprintf('      %8.4f - %8.4f MHz  (%.1f kHz, %s, %s)\n', ...
                     bands_rf(i,1)/1e6, bands_rf(i,2)/1e6, diff(bands_rf(i,:))/1e3, ...
                     band_src(i), band_chan(i));
         end
     end
-    writetable(Bt, fullfile(rfi_out, 'rfi_bands_proposed.csv'));
+    writetable(Bt, fullfile(ap.out, ['rfi_bands_proposed' ds.sfx '.csv']));
 
     % --- Figure: PSD+envelope+bands, SK ---
     % Bands are shaded by source (psd / sk / both), matching the viewer explorer.
-    % Occupancy/coherence are computed and written to rfi_spectrum.csv (still
+    % Occupancy/coherence are computed and written to rfi_spectrum<sfx>.csv (still
     % available for offline inspection) but are diagnostic-only — not consumed
     % by rfi_propose_bands — so they're left off this figure.
     ew = round(bp.env_khz*1e3/df);  ew = max(3, ew + (1-mod(ew,2)));
@@ -175,20 +213,23 @@ function compute_rfi_spectrum(cfg)
     h0 = plot(ax1, f_mhz, psd0_db, 'b'); h1 = plot(ax1, f_mhz, psd1_db, 'r');
     plot(ax1, f_mhz, env0, 'b--'); plot(ax1, f_mhz, env1, 'r--');
     ylabel(ax1,'Mean PSD (dB)'); title(ax1, sprintf( ...
-        'Season RFI spectrum — %d captures, %d segments (shaded = proposed bands)', Ncap, Mtot));
+        'Season RFI spectrum (%s) — %d captures, %d segments (shaded = proposed bands)', ...
+        ds.name, Ncap, Mtot));
     H = shade_src(ax1, bands_rf/1e6, band_src);
     legend([H h0 h1], {'psd','sk','both','ch0','ch1'}, 'Location','best');
 
     ax2 = nexttile(tl); hold(ax2,'on'); grid(ax2,'on');
     s0h = plot(ax2, f_mhz, sk0, 'b'); s1h = plot(ax2, f_mhz, sk1, 'r');
-    yline(ax2, 1, 'k-');  yline(ax2, bp.sk_threshold, 'k--');
+    yline(ax2, 1, 'k-');
+    if bp.use_sk, yline(ax2, bp.sk_threshold, 'k--'); end
     ylabel(ax2,'Spectral kurtosis'); xlabel(ax2,'RF frequency (MHz)');
     shade_src(ax2, bands_rf/1e6, band_src);
     legend([s0h s1h], {'ch0','ch1'},'Location','best');
     linkaxes([ax1 ax2], 'x');
 
-    saveas(fig, fullfile(rfi_out, 'rfi_spectrum.png'));  close(fig);
-    fprintf('[rfi] Wrote rfi_spectrum.csv / .png / rfi_bands_proposed.csv to %s\n', rfi_out);
+    saveas(fig, fullfile(ap.out, ['rfi_spectrum' ds.sfx '.png']));  close(fig);
+    fprintf('[rfi:%s] Wrote rfi_spectrum%s.csv / .png / rfi_bands_proposed%s.csv to %s\n', ...
+            ds.name, ds.sfx, ds.sfx, ap.out);
 end
 
 

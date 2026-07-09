@@ -14,15 +14,28 @@ function rfi_explorer(V)
     cfg = V.cfg;
     show_msg = @(varargin) V.U.show_msg(V, varargin{:});
     cfgdef = @(varargin) V.U.cfgdef(V, varargin{:});
-    % Interactive RFI band explorer. Reads the season per-bin statistics
-    % from rfi_spectrum.csv (compute_rfi_spectrum) and re-derives the
-    % proposed bands LIVE from the control-row values via rfi_propose_bands,
-    % so the highlighted bands update as the thresholds/gap are adjusted.
-    % The season spectrum is method-independent and season-wide, so it lives
-    % in the Static folder (cfg.input_dir), not a per-run dir.
-    csvp = fullfile(S.rfi_dir, 'rfi_spectrum.csv');
+    % Interactive RFI band explorer. Reads the season per-bin statistics from
+    % the selected 'RFI set' (Signal/NL/L) season spectrum
+    % (rfi_spectrum<sfx>.csv, compute_rfi_spectrum) and re-derives the proposed
+    % bands LIVE from the control-row values via rfi_propose_bands, so the
+    % highlighted bands update as the thresholds/gap are adjusted. The season
+    % spectra are method-independent and season-wide, so they live in the
+    % Static folder (cfg.input_dir), not a per-run dir. NL/L band-finding is
+    % PSD-excess only (the SK gate + threshold controls are disabled), so the
+    % explorer matches compute_rfi_spectrum's per-dataset gating.
+    info = V.U.rfi_dataset_info(V);
+    is_signal = info.use_sk;
+    S.rfi_usesk.Enable = matlab.lang.OnOffSwitchState(is_signal);
+    S.rfi_sk.Enable    = matlab.lang.OnOffSwitchState(is_signal);
+
+    csvp = fullfile(S.rfi_dir, info.spectrum);
     if ~isfile(csvp)
-        show_msg(['Needs rfi_spectrum.csv in ' S.rfi_dir ...
+        % Clear any bands left over from a previously-selected RFI set so a
+        % subsequent Export cannot write the wrong dataset's bands under this
+        % set's rfi_bands_proposed<sfx>.csv (they are only repopulated on a
+        % successful load below).
+        S.rfi_bands = zeros(0,2);  S.rfi_src = strings(0,1);  S.rfi_chan = strings(0,1);
+        show_msg(['Needs ' info.spectrum ' in ' S.rfi_dir ...
                   ' — set run_rfi = true and run BrundageSoOp.']);
         S.lbl_rfi.Text = '— bands';
         return;
@@ -31,11 +44,11 @@ function rfi_explorer(V)
     f = T.freq_hz / 1e6;
 
     % Live band-finder params: thresholds/gap from the controls, the rest
-    % from cfg defaults.
+    % from cfg defaults. SK is forced off for NL/L (PSD-excess only).
     p = struct();
     p.excess_db     = S.rfi_excess.Value;
     p.sk_threshold  = S.rfi_sk.Value;
-    p.use_sk        = logical(S.rfi_usesk.Value);
+    p.use_sk        = is_signal && logical(S.rfi_usesk.Value);
     p.merge_khz     = S.rfi_gap.Value;
     p.env_khz       = cfgdef('rfi_env_khz', 1000);
     p.edge_guard_hz = cfgdef('rfi_edge_guard_khz', 150) * 1e3;
@@ -46,8 +59,8 @@ function rfi_explorer(V)
     [bands_hz, src, chan] = rfi_propose_bands(T.freq_hz, T.psd_db_ch0, T.psd_db_ch1, ...
                                               T.sk_ch0, T.sk_ch1, p);
     S.rfi_bands = bands_hz;  S.rfi_src = src;  S.rfi_chan = chan;   % for Export
-    S.lbl_rfi.Text = sprintf('%d bands (%d ch0 / %d ch1 / %d both)', size(bands_hz,1), ...
-        nnz(chan=="ch0"), nnz(chan=="ch1"), nnz(chan=="both"));
+    S.lbl_rfi.Text = sprintf('%s: %d bands (%d ch0 / %d ch1 / %d both)', info.name, ...
+        size(bands_hz,1), nnz(chan=="ch0"), nnz(chan=="ch1"), nnz(chan=="both"));
     bm = bands_hz / 1e6;
 
     % Display envelope (same movmedian width the finder uses).
@@ -63,7 +76,8 @@ function rfi_explorer(V)
     h0 = plot(ax1, f, T.psd_db_ch0, 'b'); h1 = plot(ax1, f, T.psd_db_ch1, 'r');
     plot(ax1, f, env0, 'b--'); plot(ax1, f, env1, 'r--');
     ylabel(ax1,'Mean PSD (dB)');
-    title(ax1, sprintf('Season RFI spectrum — %d bands (shaded by source)', size(bm,1)));
+    title(ax1, sprintf('Season RFI spectrum (%s) — %d bands (shaded by source)', ...
+        info.name, size(bm,1)));
     H = rfi_shade_src(ax1, bm, src);
     legend([H h0 h1], {'psd','sk','both','ch0','ch1'}, 'Location','best');
 
@@ -100,20 +114,24 @@ end
 function rfi_filter_psd(V, ~)
     S = V;
     show_msg = @(varargin) V.U.show_msg(V, varargin{:});
-    cfgdef = @(varargin) V.U.cfgdef(V, varargin{:});
-    % What the notch + linear-interpolation excision does to the season mean
-    % PSD — computed from the unfiltered rfi_spectrum.csv + cfg.rfi_bands (no
-    % HPC product needed). Method-independent; reads from Static (cfg.input_dir).
-    csvp = fullfile(S.rfi_dir, 'rfi_spectrum.csv');
+    % What the notch + linear-interpolation excision does to the selected
+    % 'RFI set' (Signal/NL/L) season mean PSD — computed from the unfiltered
+    % rfi_spectrum<sfx>.csv + that set's curated bands (Signal -> cfg.rfi_bands,
+    % NL -> cfg.rfi_bands_nl, L -> cfg.rfi_bands_l; no HPC product needed).
+    % Method-independent; reads from Static (cfg.input_dir). Only the 'RFI set'
+    % selector is live on this view — the threshold/gap/SK/Export controls are
+    % disabled (this view shows curated bands, it does not propose them).
+    info = V.U.rfi_dataset_info(V);
+    csvp = fullfile(S.rfi_dir, info.spectrum);
     if ~isfile(csvp)
-        show_msg(['Needs rfi_spectrum.csv in ' S.rfi_dir ...
+        show_msg(['Needs ' info.spectrum ' in ' S.rfi_dir ...
                   ' — set run_rfi = true and run BrundageSoOp.']);
         return;
     end
-    bands = cfgdef('rfi_bands', []);
+    bands = rfi_curated_bands(V.cfg, info.name);
     if isempty(bands)
-        show_msg(['cfg.rfi_bands is empty — set it (Export from the RFI ' ...
-                  'explorer) to see the filter effect.']);
+        show_msg(['No curated ' info.curated ' bands loaded — export from the ' ...
+                  'RFI explorer and load them to see the filter effect.']);
         return;
     end
     T  = readtable(csvp);
@@ -134,7 +152,7 @@ function rfi_filter_psd(V, ~)
     ylabel(ax1, 'Season PSD (dB)');
     % After-traces are shown in the bottom tile only — this tile marks just
     % the proposed bands against the unfiltered season PSD.
-    title(ax1, 'Notch + interp bands over the unfiltered season PSD');
+    title(ax1, sprintf('Notch + interp bands over the unfiltered season PSD (%s)', info.name));
     legend([hb b0 b1], {'bands','ch0 before','ch1 before'}, 'Location','best');
 
     % Bottom tile: the filtered (after) PSD alone — those bins are replaced
@@ -145,6 +163,17 @@ function rfi_filter_psd(V, ~)
     title(ax2, 'Notch Filtered w/ linear Interpolation');
     legend(ax2, {'ch0','ch1'}, 'Location','best');
     linkaxes([ax1 ax2], 'xy');
+end
+
+
+function bands = rfi_curated_bands(cfg, name)
+    % Curated band list for an 'RFI set' (Signal/NL/L), empty if not loaded.
+    switch char(name)
+        case 'NL', fld = 'rfi_bands_nl';
+        case 'L',  fld = 'rfi_bands_l';
+        otherwise, fld = 'rfi_bands';
+    end
+    if isfield(cfg, fld) && ~isempty(cfg.(fld)), bands = cfg.(fld); else, bands = []; end
 end
 
 

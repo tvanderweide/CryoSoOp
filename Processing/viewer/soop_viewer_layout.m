@@ -76,14 +76,20 @@ function soop_viewer_layout(V)
     S.btn_next = uibutton(r2, 'Text', 'Next >', 'ButtonPushedFcn', @(~,~) V.CB.step_cap(V, +1));
     S.lbl_cap  = uilabel(r2, 'Text', '');
 
-    % Row 3 — RFI band-explorer controls (shown only for 'Raw: Season RFI
-    % spectrum'; collapsed to height 0 otherwise, toggled in refresh). Adjust
-    % the thresholds/gap to re-derive and re-highlight the proposed bands live,
-    % then Export to write rfi_bands_proposed.csv + a cfg.rfi_bands snippet.
-    S.rfi_row = uigridlayout(gl, [1 11]);
+    % Row 3 — RFI band-explorer controls (shown for the two season RFI views;
+    % collapsed to height 0 otherwise, toggled in refresh — on the notch-effect
+    % view only the 'RFI set' selector stays enabled). 'RFI set' picks which
+    % season spectrum (Signal / NL / L) feeds the view; adjust the
+    % thresholds/gap to re-derive and re-highlight the proposed bands live,
+    % then Export to write that set's rfi_bands_proposed CSV. (Named 'RFI set'
+    % because row 2 already has a 'Dataset' label for the method selector.)
+    S.rfi_row = uigridlayout(gl, [1 13]);
     S.rfi_row.Layout.Row = 3;
-    S.rfi_row.ColumnWidth = {72, 60, 28, 64, 58, 150, 52, 74, 110, 220, '1x'};
+    S.rfi_row.ColumnWidth = {46, 72, 72, 60, 28, 64, 58, 150, 52, 74, 110, 220, '1x'};
     S.rfi_row.Padding = [0 0 0 0];
+    uilabel(S.rfi_row, 'Text', 'RFI set', 'HorizontalAlignment', 'right');
+    S.rfi_dataset = uidropdown(S.rfi_row, 'Items', {'Signal', 'NL', 'L'}, ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     uilabel(S.rfi_row, 'Text', 'Excess dB', 'HorizontalAlignment', 'right');
     S.rfi_excess = uieditfield(S.rfi_row, 'numeric', 'Limits', [0 40], ...
         'Value', cfgdef('rfi_excess_db', 6), 'ValueChangedFcn', @(~,~) V.CB.refresh(V));

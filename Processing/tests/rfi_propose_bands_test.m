@@ -53,6 +53,20 @@ function test_sk_only_ch0(tc)
     verifyEqual(tc, ch(1),  "ch0");
 end
 
+function test_no_sk_when_disabled(tc)
+    % NL/L datasets run PSD-excess only (use_sk = false in the stage/explorer):
+    % an SK-only spike must be ignored, while a PSD spike is still flagged "psd".
+    [f, psd0, psd1, sk0, sk1, p] = base_inputs();
+    p.use_sk = false;
+    sk0(bin_at(f, 369.5e6)) = 200;                  % SK spike -> ignored (no PSD excess)
+    psd0(bin_at(f, 370.5e6)) = -90;                 % PSD spike -> still flagged
+    [b, src, ch] = rfi_propose_bands(f, psd0, psd1, sk0, sk1, p);
+    verifyEqual(tc, size(b,1), 1);                  % only the PSD spike survives
+    verifyEqual(tc, src(1), "psd");
+    verifyEqual(tc, ch(1),  "ch0");
+    verifyTrue(tc, all(b(:,1) > 370.0e6));          % the SK-only spike at 369.5 is gone
+end
+
 function test_merged_ch0_ch1_both(tc)
     [f, psd0, psd1, sk0, sk1, p] = base_inputs();
     psd0(bin_at(f, 369.500e6)) = -90;               % ch0 spike
