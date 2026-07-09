@@ -7,6 +7,7 @@ function soop_viewer_render_raw(V, kind)
     npts = V.npts;
     Erfi = V.Erfi;
     show_msg = @(varargin) V.U.show_msg(V, varargin{:});
+    cfgdef = @(varargin) V.U.cfgdef(V, varargin{:});
     dropdown_method = @(varargin) V.U.dropdown_method(V, varargin{:});
     prep_excis = @(varargin) V.U.prep_excis(V, varargin{:});
     raw_cap_title = @(varargin) V.U.raw_cap_title(V, varargin{:});
@@ -181,7 +182,10 @@ function soop_viewer_render_raw(V, kind)
             plot(ax, f_mhz, dB0, 'Color', [0.3 0.45 0.75 0.45], 'LineWidth', 0.5);
             hold(ax, 'on');
             plot(ax, f_mhz, dB1, 'Color', [0.75 0.375 0.225 0.45], 'LineWidth', 0.5);
-            sm = 150;   % ~150 display pts (~750 kHz smoothing)
+            % Envelope width from cfg.rfi_env_khz (same knob as the season PSD
+            % envelope), converted to display bins via the decimated axis
+            % spacing. Assumes a normal multi-segment capture (numel(D.f) >= 2).
+            sm = rfi_env_window(cfgdef('rfi_env_khz', 1000), D.f(2) - D.f(1));
             plot(ax, f_mhz, movmedian(dB0, sm), 'b', 'LineWidth', 1.8);
             plot(ax, f_mhz, movmedian(dB1, sm), 'r', 'LineWidth', 1.8);
             xline(ax, cfg.freq_hz/1e6, ':', 'LO', 'LabelVerticalAlignment', 'bottom', ...
@@ -276,7 +280,9 @@ function soop_viewer_render_raw(V, kind)
             plot(ax, f_mhz, D.A0, 'Color', [0.4 0.6 1.0 0.45], 'LineWidth', 0.5);
             hold(ax, 'on');
             plot(ax, f_mhz, D.A1, 'Color', [1.0 0.5 0.3 0.45], 'LineWidth', 0.5);
-            sm = 150;
+            % Envelope width from cfg.rfi_env_khz, converted to display bins via
+            % the decimated axis spacing. Assumes numel(D.f) >= 2 (normal capture).
+            sm = rfi_env_window(cfgdef('rfi_env_khz', 1000), D.f(2) - D.f(1));
             plot(ax, f_mhz, movmedian(D.A0, sm), 'b', 'LineWidth', 1.8);
             plot(ax, f_mhz, movmedian(D.A1, sm), 'r', 'LineWidth', 1.8);
             xline(ax, cfg.freq_hz/1e6, ':', 'LO', 'LabelVerticalAlignment', 'bottom', ...

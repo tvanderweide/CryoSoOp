@@ -29,9 +29,8 @@ function [bands_hz, source, channel] = rfi_propose_bands(freq_hz, psd0_db, psd1_
     sk0      = sk0(:);      sk1     = sk1(:);
     df       = freq_hz(2) - freq_hz(1);
 
-    % Smoothed PSD envelope (odd movmedian window).
-    w  = round(p.env_khz * 1e3 / df);
-    w  = max(3, w + (1 - mod(w, 2)));         % force odd, >= 3
+    % Smoothed PSD envelope (odd movmedian window; shared cfg.rfi_env_khz width).
+    w  = rfi_env_window(p.env_khz, df);
     env0 = movmedian(psd0_db, w);
     env1 = movmedian(psd1_db, w);
 

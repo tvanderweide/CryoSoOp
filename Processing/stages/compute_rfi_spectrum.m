@@ -39,7 +39,7 @@ function compute_rfi_spectrum(cfg)
     ap.n_read    = getdef(cfg, 'rfi_read_samples', 16*ap.seg_len);
     ap.excess_db = getdef(cfg, 'rfi_excess_db',    6);      % per-capture occupancy excess (diag)
     ap.max_caps  = getdef(cfg, 'rfi_max_captures', 500);    % even season subsample
-    ap.base_khz  = getdef(cfg, 'rfi_baseline_khz', 750);    % per-capture occupancy baseline width
+    ap.base_khz  = getdef(cfg, 'rfi_env_khz', 1000);        % occupancy baseline width = the shared PSD-envelope width (cfg.rfi_env_khz)
     % Band-finder (shared with the viewer's interactive explorer; see rfi_propose_bands):
     bp.excess_db      = ap.excess_db;                           % PSD-excess-above-envelope (dB)
     bp.sk_threshold   = getdef(cfg, 'rfi_sk_threshold',   100); % also flag SK >= this
@@ -203,7 +203,7 @@ function aggregate_dataset(ds, bp, ap)
     % Occupancy/coherence are computed and written to rfi_spectrum<sfx>.csv (still
     % available for offline inspection) but are diagnostic-only — not consumed
     % by rfi_propose_bands — so they're left off this figure.
-    ew = round(bp.env_khz*1e3/df);  ew = max(3, ew + (1-mod(ew,2)));
+    ew = rfi_env_window(bp.env_khz, df);
     env0 = movmedian(psd0_db, ew);  env1 = movmedian(psd1_db, ew);
     f_mhz = f_rf / 1e6;
     fig = figure('Visible','off','Position',[60 60 1150 650]);
@@ -261,8 +261,9 @@ function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, exc
     end
     ms = nseg;
 
-    % Per-capture occupancy: this capture's mean PSD vs its movmedian baseline.
-    base_bins = max(3, round(base_khz*1e3 / df));
+    % Per-capture occupancy: this capture's mean PSD vs its movmedian baseline
+    % (same cfg.rfi_env_khz width as every other PSD envelope, via rfi_env_window).
+    base_bins = rfi_env_window(base_khz, df);
     d0 = 10*log10(a0/nseg) - movmedian(10*log10(a0/nseg), base_bins, 'omitnan');
     d1 = 10*log10(a1/nseg) - movmedian(10*log10(a1/nseg), base_bins, 'omitnan');
     o0 = double(d0 >= excess_db);

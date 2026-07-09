@@ -142,7 +142,7 @@ their stage/viewer fallback, not just the two previously flagged — see
 | `cfg.rfi_excess_db` | `3` | flag bins this many dB above the smoothed PSD envelope — **diverges from the stage/viewer fallback of 6; see below** |
 | `cfg.rfi_sk_threshold` | `50` | also flag bins with spectral kurtosis >= this (bursty RFI) — **diverges from the stage/viewer fallback of 100; see below** |
 | `cfg.rfi_use_sk` | `true` | include the SK gate in the proposed bands |
-| `cfg.rfi_env_khz` | `500` | PSD-envelope movmedian width — **diverges from the stage/viewer fallback of 1000; see below** |
+| `cfg.rfi_env_khz` | `500` | **The single PSD-envelope movmedian width.** Drives the season-aggregate envelope, the band-finder gate (`rfi_propose_bands`), the per-capture occupancy baseline (formerly `rfi_baseline_khz`), and the viewer's single-capture `Raw: PSD` + `Raw: FFT Amplitude` display envelopes. All go through the shared helper `rfi/rfi_env_window.m` (kHz -> odd movmedian window in bins). **Diverges from the stage/viewer fallback of 1000; see below** |
 | `cfg.rfi_merge_khz` | `15` | merge flagged runs closer than this into one band — **diverges from the stage/viewer fallback of 25; see below** |
 | `cfg.rfi_edge_guard_khz` | `0` | drop the outer band edges (FFT-edge artifacts) — **diverges from the stage/viewer fallback of 150; see below** |
 | `cfg.rfi_band_pad_khz` | `1` | widen each proposed band for the L1 notch |
@@ -177,7 +177,6 @@ the entry script at all (no corresponding `cfg.*` assignment exists in
 | `rfi_seg_len` | `2^16` | ~305 Hz bins at 20 MS/s |
 | `rfi_read_samples` | `16*seg_len` | |
 | `rfi_max_captures` | `500` | even season subsample |
-| `rfi_baseline_khz` | `750` | per-capture occupancy baseline width |
 | `rfi_protect_hz` | `50e3` | +/- around DC (LO leak) |
 
 The remaining `compute_rfi_spectrum` `getdef` fallbacks (`rfi_excess_db`,

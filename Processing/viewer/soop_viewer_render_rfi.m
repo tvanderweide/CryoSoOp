@@ -63,9 +63,9 @@ function rfi_explorer(V)
         size(bands_hz,1), nnz(chan=="ch0"), nnz(chan=="ch1"), nnz(chan=="both"));
     bm = bands_hz / 1e6;
 
-    % Display envelope (same movmedian width the finder uses).
+    % Display envelope (same movmedian width the finder uses; shared cfg.rfi_env_khz).
     df = T.freq_hz(2) - T.freq_hz(1);
-    ew = round(p.env_khz*1e3/df);  ew = max(3, ew + (1-mod(ew,2)));
+    ew = rfi_env_window(p.env_khz, df);
     env0 = movmedian(T.psd_db_ch0, ew);  env1 = movmedian(T.psd_db_ch1, ew);
 
     % Occupancy/coherence (rfi_spectrum.csv columns) are diagnostic-only —
