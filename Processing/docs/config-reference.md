@@ -37,6 +37,67 @@ Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
 | `cfg.tower_h_m` | `6.096` m (20 ft) | confirmed 2026-06-12; RS2 survey 2026-06-15 (point 20 ft below antennas) reconfirms |
 | `cfg.T_load_K` | `303` K | load temperature, assumed ambient |
 
+### Radar-equation calibration (compute_sigma0)
+
+`compute_sigma0` derives apparent normalized bistatic radar cross section
+(sigma0, incoherent — from the variance of the calibrated direct/reflected
+cross-correlation over a sliding window) and coherent power reflectivity
+(Gamma), via a direct-referenced radar equation: EIRP cancels by referencing
+to the measured direct-channel power, standard practice for MUOS signals of
+opportunity, since MUOS EIRP is not published as a measured value and the
+signal is power-controlled (Shah et al. 2017, IEEE Geoscience and Remote
+Sensing Letters 14(3)). Inputs: L1 (incl. the `pow_ch0_fd` / `pow_ch0_fd_muos`
+/ `pow_ch1_fd` / `pow_ch1_fd_muos` channel-power columns), L2 (detrended
+phase + `theta_deg`), compute_calib's gain ratio (`G_De`/`G_Re`,
+nearest-within-tolerance join), the elevation table's `range_km` column, and
+SNOdar snow depth for the snow-corrected footprint variant. Output:
+`BrundageSoOp_sigma0.csv`, written per RFI-method product dir like every
+other stage.
+
+Footprint: first-Fresnel-zone ellipse (Larson & Nievinski 2013, GPS
+Solutions 17(1), appendix): `d = lambda/2; b = sqrt(2*d*h/sin(e) +
+(d/sin(e))^2); a = b/sin(e); A_eff = pi*a*b`, computed twice per capture —
+once with `cfg.tower_h_m` and once with the SNOdar-corrected height — for
+the fixed-height and snow-corrected footprint variants.
+
+Antenna gain/pol fields are deployment hardware; `site_config.json`'s
+`site.*` block overrides the placeholders below (see the README's
+"Deploying at a new site"). The rest are science parameters that stay in
+`BrundageSoOp.m`.
+
+| Field | Default | Notes |
+|---|---|---|
+| `cfg.ant_gain_direct_dbi` | `2` dBi | Direct-channel antenna gain toward the satellite. The in-code default is a generic placeholder; the Brundage `site_config.json` carries the measured value **4.1 dBic** for the deployed OSU compact P-band dual-CP patch (Shen & Chen, *P-Band Signals of Opportunity Antenna Fabrication and Testing*, OSU ElectroScience Laboratory report AWD106817-Final, July 2022: measured boresight realized gain ~4.1 dBic on both CP ports, ~90° 3-dB beamwidth, >20 dB cross-pol isolation, axial ratio < 1.25 over 360–380 MHz). This is a BORESIGHT gain — the stage assumes the antenna is boresighted on the satellite. Override via `site_config.json` `site.ant_gain_direct_dbi` |
+| `cfg.ant_gain_reflected_dbi` | `2` dBi | Reflected-channel antenna gain toward the specular point — same OSU patch, LHCP port, measured **4.1 dBic** boresight (in `site_config.json`). Boresight assumption: if the downlooking antenna is not aimed at the specular point, the ~90° beam rolls the effective gain off (≈ −3 dB at 45° off boresight). Override via `site_config.json` `site.ant_gain_reflected_dbi` |
+| `cfg.ant_pol_direct` | `'RHCP'` | Direct-channel antenna polarization — provenance only (RHCP = MUOS co-pol); no polarization-mismatch factor is applied to the products. Override via `site_config.json` `site.ant_pol_direct` |
+| `cfg.ant_pol_reflected` | `'LHCP'` | Reflected-channel antenna polarization — provenance only (LHCP matches the reflection handedness flip); no mismatch factor applied. Override via `site_config.json` `site.ant_pol_reflected` |
+| `cfg.sigma0_win_hours` | `24` h | Centered sliding-window width for the incoherent-sigma0 window statistics |
+| `cfg.sigma0_min_count` | `5` | Minimum valid captures required in a window; below this the window's products are left NaN (the row is still written) |
+| `cfg.sigma0_min_elev_deg` | `5` deg | Elevation gate — below this the flat-horizontal-reflector footprint assumption breaks down near grazing, so the capture is excluded |
+| `cfg.sigma0_min_dsnr_db` | `10` dB | Direct-channel SNR gate protecting the ratio estimator |
+| `cfg.sigma0_cal_max_age_hr` | `1` h | Nearest-within-tolerance join window to the calib gain ratio (`G_De`/`G_Re`); matches compute_L2's chain-cal join tolerance |
+| `cfg.sigma0_corr_family` | `'fd_muos'` | Which L1 amplitude / L2 phase family feeds the correlation: `'fd_muos'` (default, MUOS sub-channels), `'fd'` (full-band frequency-domain), or `'td'` (time-domain) |
+
+**Limitations**: both gain fields are scalar, boresight-style values — there
+is no directional antenna pattern support (a documented limitation, not a
+bug); with the deployed patches' ~90° beamwidth, mispointing from the
+satellite / specular directions rolls the true gain off by up to a few dB.
+The Fresnel footprint assumes a flat, HORIZONTAL reflector: local terrain
+slope at the specular point shifts both the specular geometry and A_eff
+(≈ −4.5 %/deg of effective-elevation change at 38°), and for dry snow the
+dominant P-band reflector can be the snow–ground interface rather than the
+snow surface (the fixed-h and snow-h variants bracket the two cases). The
+first-Fresnel-zone A_eff is the coherent footprint; diffuse (incoherent)
+scatter is antenna-beam-weighted and can extend well beyond it, so the
+absolute sigma0 scale carries that area-model choice. The products are
+*apparent* (noise-contaminated) sigma0/Gamma with
+competing, unsigned biases: receiver noise is not subtracted in this release,
+which pulls both products low, while residual estimator noise inflates the
+sigma0 variance high — so neither product is a one-sided bound on the true
+value (Gamma, having no variance term, is predominantly biased low). The
+`dsnr_db` and `c_var_noise_est` columns in the output CSV are per-row
+diagnostics of the two effects rather than corrections.
+
 ### Site geometry (Emlid Reach RS2 survey, 2026-06-15)
 
 | Field | Value | Notes |

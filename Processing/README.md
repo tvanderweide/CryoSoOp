@@ -35,12 +35,13 @@ are discovered automatically from `cfg.data_dir`.
 
 ### Processing toggles
 
-Near the top of `BrundageSoOp.m`, six toggles gate the pipeline stages
-(`run_L1`, `run_calib`, `run_snr`, `run_satid`, `run_L2`, `run_rfi`). The
-defaults process on the HPC and leave everything off for local/interactive
-use; override them directly in the script for a one-off local run — for
-example, setting `run_calib = true` locally against an external data drive
-runs a full calibration pass (reads tens of GB; takes 1-2 hours).
+Near the top of `BrundageSoOp.m`, seven toggles gate the pipeline stages
+(`run_L1`, `run_calib`, `run_snr`, `run_satid`, `run_L2`, `run_rfi`,
+`run_sigma0`). The defaults process on the HPC and leave everything off for
+local/interactive use; override them directly in the script for a one-off
+local run — for example, setting `run_calib = true` locally against an
+external data drive runs a full calibration pass (reads tens of GB; takes
+1-2 hours).
 
 ### Inspecting an RFI-excised set
 
@@ -182,6 +183,14 @@ Dispatched in order by `soop_run_pipeline`:
    observed sky-signal phase to confirm which one the antenna is tracking.
 6. **compute_L2** — applies the geometric range correction and receiver-chain
    phase calibration to produce the final corrected phase series.
+7. **compute_sigma0** derives apparent normalized bistatic radar cross
+   section (sigma0) and coherent power reflectivity (Gamma) via a
+   direct-referenced radar equation, from L1 (incl. its channel-power
+   columns), L2's corrected phase and elevation angle, compute_calib's gain
+   ratio, the elevation table's range, and SNOdar snow depth for the
+   snow-corrected footprint variant. Writes `BrundageSoOp_sigma0.csv` per
+   RFI-method product dir; requires re-running `compute_L1` on any season
+   processed before the channel-power columns existed.
 
 Full detail on inputs, outputs, CSV columns, and per-stage configuration
 fields is in each `stages/*.m` file header and in
