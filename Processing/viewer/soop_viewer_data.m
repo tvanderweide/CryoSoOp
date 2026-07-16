@@ -16,6 +16,7 @@ function load_csvs(V)
     S.L1   = M.read_product(fullfile(cfg.out_dir, 'BrundageSoOp_L1_sig.csv'));
     S.CAL  = M.read_product(fullfile(cfg.out_dir, 'BrundageSoOp_calib.csv'));
     S.L2   = M.read_product(fullfile(cfg.out_dir, 'BrundageSoOp_L2.csv'));
+    S.SIG0 = M.read_product(fullfile(cfg.out_dir, 'BrundageSoOp_sigma0.csv'));
     S.CAND = M.read_product(fullfile(cfg.out_dir, 'sat_candidates_corrected.csv'));
     S.WX   = M.load_snodar(cfg);
 

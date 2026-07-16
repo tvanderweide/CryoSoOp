@@ -122,8 +122,10 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [19 1]);
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl = uigridlayout(r3, [21 1]);
+    % Rows 12/13 (geometry toggles, footprint-map controls) are two-line
+    % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -243,6 +245,88 @@ function soop_viewer_layout(V)
                               'Value', false, 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.detrend_row = detrend_row;
     S.detrend_row.Visible = 'off';
+
+    % Geometry-series toggles — shown only for 'Radar Cal: geometry (r2c / r1mc /
+    % A_eff)'. Each checkbox draws one geometry series: r_2c (= r_d_m) and r_1mc
+    % on a shared log-scale left axis (m), A_eff on the linear right axis (m^2);
+    % the legend lists only the checked series. The h dropdown selects the
+    % reflector-height variant for r_1mc / A_eff: snow-corrected (default),
+    % fixed tower height, or both overlaid (fixed solid, snow dashed).
+    % Defaults show only A_eff.
+    % Two-line sub-grid (the four controls overflow the side panel on one
+    % line): checkboxes on top, the h dropdown below. 'fixed h' is the default
+    % so the view renders even without weather-station data.
+    geom_row = uigridlayout(info_gl, [2 3]);
+    geom_row.ColumnWidth = {'fit', 'fit', 'fit'};
+    geom_row.RowHeight   = {'fit', 'fit'};
+    geom_row.RowSpacing  = 2;
+    geom_row.Padding = [0 0 0 0];
+    S.cb_geom_r2   = uicheckbox(geom_row, 'Text', 'r_2c range', 'Value', false, ...
+                                'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.cb_geom_r1   = uicheckbox(geom_row, 'Text', 'r_1mc range', 'Value', false, ...
+                                'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.cb_geom_aeff = uicheckbox(geom_row, 'Text', 'A_eff footprint', 'Value', true, ...
+                                'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.dd_geom_h    = uidropdown(geom_row, 'Items', {'snow h', 'fixed h', 'both'}, ...
+                                'Value', 'fixed h', ...
+                                'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.dd_geom_h.Layout.Row = 2;
+    S.dd_geom_h.Layout.Column = [1 2];
+    S.geom_row = geom_row;
+    S.geom_row.Visible = 'off';
+
+    % Footprint-map controls — shown only for 'Radar Cal: footprint map'. The
+    % satellite dropdown lists every muos_elevation_<norad>.csv found in
+    % cfg.elev_dir (the MATLAB-side notion of "TLE available"; generate more
+    % with make_muos_elevation.py); the h dropdown picks the reflector-height
+    % variant(s) for the drawn Fresnel ellipse.
+    % The date picker selects WHICH DAY the footprint is drawn for (that day's
+    % mean elevation/azimuth and mean SNOdar depth — the snow-corrected h moves
+    % with snow depth). Cleared (empty) = mean over the top date range.
+    map_row = uigridlayout(info_gl, [2 2]);
+    map_row.ColumnWidth = {'fit', '1x'};
+    map_row.RowHeight   = {'fit', 'fit'};
+    map_row.RowSpacing  = 2;
+    map_row.Padding = [0 0 0 0];
+    sat_names = {'(no elevation tables)'};
+    sat_ids   = {[]};
+    if isfield(V.cfg, 'elev_dir')
+        cand = dir(fullfile(V.cfg.elev_dir, 'muos_elevation_*.csv'));
+        if ~isempty(cand)
+            known = containers.Map({'38093', '39206', '41622'}, ...
+                                   {'MUOS-1', 'MUOS-2', 'MUOS-5'});
+            sat_names = {};  sat_ids = {};
+            for ci = 1:numel(cand)
+                tok = regexp(cand(ci).name, 'muos_elevation_(\d+)\.csv', 'tokens', 'once');
+                if isempty(tok), continue; end
+                if isKey(known, tok{1}), nm = known(tok{1});
+                else,                    nm = ['NORAD ' tok{1}];
+                end
+                sat_names{end+1} = sprintf('%s (%s)', nm, tok{1});  %#ok<AGROW>
+                sat_ids{end+1}   = str2double(tok{1});              %#ok<AGROW>
+            end
+        end
+    end
+    % Two-line sub-grid: satellite selector on top (full width), h variant +
+    % footprint date below. 'fixed h' default so the map renders without
+    % weather-station data.
+    S.dd_map_sat = uidropdown(map_row, 'Items', sat_names, 'ItemsData', sat_ids, ...
+                              'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.dd_map_sat.Layout.Row = 1;
+    S.dd_map_sat.Layout.Column = [1 2];
+    S.dd_map_h   = uidropdown(map_row, 'Items', {'snow h', 'fixed h', 'both'}, ...
+                              'Value', 'fixed h', ...
+                              'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.dd_map_h.Layout.Row = 2;
+    S.dd_map_h.Layout.Column = 1;
+    S.dp_map     = uidatepicker(map_row, 'Value', NaT, ...
+                              'Tooltip', ['Footprint date (day mean el/az + ' ...
+                              'snow depth); empty = mean over the date range'], ...
+                              'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.dp_map.Layout.Row = 2;
+    S.dp_map.Layout.Column = 2;
+    S.map_row = map_row;
+    S.map_row.Visible = 'off';
 
     uilabel(info_gl, 'Text', 'Now showing', 'FontWeight', 'bold');
     S.lbl_settings = uitextarea(info_gl, 'Value', '', 'Editable', 'off');

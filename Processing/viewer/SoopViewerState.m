@@ -48,6 +48,7 @@ classdef SoopViewerState < handle
         L1
         CAL
         L2
+        SIG0
         CAND
         WX
         OVF
@@ -116,6 +117,15 @@ classdef SoopViewerState < handle
         ampscale_row
         sw_detrend
         detrend_row
+        cb_geom_r2
+        cb_geom_r1
+        cb_geom_aeff
+        dd_geom_h
+        geom_row
+        dd_map_sat
+        dd_map_h
+        dp_map
+        map_row
         lbl_settings
         lbl_expl
         lbl_math

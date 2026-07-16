@@ -333,6 +333,14 @@ function render_now(V)
                  startsWith(kind, 'L2: Diurnal');
     S.detrend_row.Visible = matlab.lang.OnOffSwitchState(is_diurnal);
 
+    % Geometry-series checkboxes apply only to the Radar Cal geometry view.
+    is_geom = strcmp(kind, 'Radar Cal: geometry (r2c / r1mc / A_eff)');
+    S.geom_row.Visible = matlab.lang.OnOffSwitchState(is_geom);
+
+    % Satellite/h selectors apply only to the Radar Cal footprint map.
+    is_map = strcmp(kind, 'Radar Cal: footprint map');
+    S.map_row.Visible = matlab.lang.OnOffSwitchState(is_map);
+
     % Weather-overlay toggles (snow depth + the two temperatures) apply only to
     % the L2: Candidates views, which now carry the optional overlay.
     is_cand = startsWith(kind, 'L2: Candidates');
@@ -370,6 +378,8 @@ function render_now(V)
             soop_viewer_render_calib(V, kind);
         elseif startsWith(kind, 'L2:')
             soop_viewer_render_l2(V, kind);
+        elseif startsWith(kind, 'Radar Cal:')
+            soop_viewer_render_sigma0(V, kind);
         else   % 'L1: *' and 'Data availability' read the L1 CSV
             soop_viewer_render_l1(V, kind);
         end
@@ -401,6 +411,9 @@ function update_info(V, info)
     lines(end+1) = "L1 CSV: "    + src_desc(S.L1);
     lines(end+1) = "Calib CSV: " + src_desc(S.CAL);
     lines(end+1) = "L2 CSV: "    + src_desc(S.L2);
+    if startsWith(info.name, 'Radar Cal:')
+        lines(end+1) = "Sigma0 CSV: " + src_desc(S.SIG0);
+    end
     S.lbl_settings.Value = char(join(lines, newline));
     S.lbl_expl.Value     = info.expl;
 

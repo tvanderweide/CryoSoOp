@@ -473,12 +473,15 @@ end
 
 function tf = plot_uses_method(kind)
     % True when the Dataset selection affects this plot: every product-CSV
-    % plot (it switches cfg.out_dir) plus the live-filtered raw views.
+    % plot (it switches cfg.out_dir) plus the live-filtered raw views. The
+    % Radar Cal footprint map is a pure forward model (no product read), so
+    % the Dataset selector is greyed out there.
     raw_filterable = {'Raw: PSD (ch0 & ch1)', 'Raw: Spectrogram', ...
                       'Raw: Cross-correlation profile', ...
                       'Raw: Cross-correlation Comparison', ...
                       'Raw: Time domain', 'Raw: FFT Amplitude'};
-    tf = ~startsWith(kind, 'Raw:') || any(strcmp(kind, raw_filterable));
+    tf = (~startsWith(kind, 'Raw:') || any(strcmp(kind, raw_filterable))) ...
+         && ~strcmp(kind, 'Radar Cal: footprint map');
 end
 
 
