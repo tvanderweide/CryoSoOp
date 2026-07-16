@@ -13,20 +13,33 @@ function compute_L1(cfg)
 % columns: timestamp, base_name, peak_lag, meas_peak_lag, peak_amplitude,
 % peak_phase_deg, snr_db, noise_floor, segments_processed, file_size_bytes,
 % overflow_flag, peak_amplitude_fd, peak_phase_deg_fd, peak_amplitude_fd_muos,
-% peak_phase_deg_fd_muos.
+% peak_phase_deg_fd_muos, pow_ch0_fd, pow_ch0_fd_muos, pow_ch1_fd,
+% pow_ch1_fd_muos.
 %   - meas_peak_lag: MEASURED discrete argmax of |R_xy| over +-lag_half_win
 %     (diagnostic only — the observable is always extracted at cfg.peak_lag).
 %   - peak_amplitude_fd/peak_phase_deg_fd: cross-spectrum evaluated at
 %     cfg.peak_lag directly (no ifft/sinc round-trip); _fd_muos restricts
 %     the same sum to cfg.muos_bands.
+%   - pow_ch0_fd/pow_ch1_fd: windowed per-channel band powers (ADC^2) from the
+%     SAME Hann-windowed segment spectra as peak_*_fd — sum_k |F|^2/n_segs/npts^2
+%     with the SAME 1/npts^2 normalization (direct = ch0, reflected = ch1);
+%     _fd_muos restricts the sum to cfg.muos_bands (NaN when muos_bands is
+%     empty). The window/normalization factors cancel in ratios such as
+%     peak_amplitude_fd_muos^2/(pow_ch0_fd_muos*pow_ch1_fd_muos), so those
+%     ratios are window-independent; the columns feed the sigma0 stage's
+%     direct-referenced calibration.
 %   - overflow_flag (0/1): from cfg.overflow_file; 0 for all rows with a
 %     warning logged if the file is absent/missing. compute_L2 excludes
 %     overflow_flag==1 rows from the phase time series.
 %
 % Schema migration (behavior unchanged numerically): a sig CSV missing
-% peak_phase_deg_fd is archived and the season reprocessed (sinc columns
-% recomputed byte-identically, fd columns added); a sig CSV missing
-% overflow_flag is patched in place from cfg.overflow_file, no reprocessing.
+% peak_phase_deg_fd OR any of the four channel-power columns (pow_ch0_fd,
+% pow_ch0_fd_muos, pow_ch1_fd, pow_ch1_fd_muos — a partial set counts as
+% missing) is archived (collision-safe yyyyMMdd_HHmmss suffix) and the season
+% reprocessed: existing columns are recomputed byte-identically and the missing
+% columns added (the FFT-derived columns can't be back-patched); a sig CSV
+% missing overflow_flag is patched in place from cfg.overflow_file, no
+% reprocessing.
 %
 % cfg fields consumed: data_dir, out_dir, fs, Ti, num_segs, peak_lag,
 % lag_half_win, min_bytes, batch_size (default 200), use_gpu, overflow_file,
@@ -110,8 +123,13 @@ function compute_L1(cfg)
         end
     end
 
-    % --- Archive + reprocess any L1 sig CSV missing the freq-domain phase ---
-    % fd columns can't be back-patched.
+    % --- Archive + reprocess any L1 sig CSV missing FFT-derived columns ---
+    % The freq-domain phase (peak_*_fd) and channel-power (pow_ch*_fd) columns
+    % both need per-segment FFTs and can't be back-patched, so a CSV missing the
+    % fd phase OR any of the four channel-power columns (a partial set included)
+    % is archived and the season reprocessed. Archive names carry a full
+    % yyyyMMdd_HHmmss stamp so repeated migrations never collide.
+    pow_cols = {'pow_ch0_fd', 'pow_ch0_fd_muos', 'pow_ch1_fd', 'pow_ch1_fd_muos'};
     for mi = 1:nM
         os = out_sig{mi};
         if ~isfile(os), continue; end
@@ -120,12 +138,16 @@ function compute_L1(cfg)
         catch
             continue;   % unreadable file is reported in the done loop below
         end
-        if ~ismember('peak_phase_deg_fd', v)
-            stamp    = string(datetime('now', 'Format', 'yyyyMMdd'));
-            archived = strrep(os, '.csv', "_pre_fdphase_" + stamp + ".csv");
+        need_fdphase = ~ismember('peak_phase_deg_fd', v);
+        need_chanpow = ~all(ismember(pow_cols, v));
+        if need_fdphase || need_chanpow
+            if need_fdphase, tag = "fdphase"; else, tag = "chanpow"; end
+            stamp    = string(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
+            archived = strrep(os, '.csv', "_pre_" + tag + "_" + stamp + ".csv");
             movefile(os, archived);
-            fprintf(['[L1] %s lacks the frequency-domain phase columns — ' ...
-                     'archived to %s; reprocessing to add them.\n'], os, archived);
+            fprintf(['[L1] %s lacks the frequency-domain phase / channel-power ' ...
+                     'columns — archived to %s; reprocessing to add them.\n'], ...
+                     os, archived);
         end
     end
 
@@ -332,7 +354,12 @@ function [rows, rej] = process_pair(f_ch0, base_name, cfg, win, npts, overflow_s
     % fft order), not R_xy: the phase observable is read straight from S in the
     % frequency domain (no ifft/sinc), and R_xy is recovered with a single ifft
     % after averaging for the magnitude QA.
-    S_sum = repmat({zeros(npts, 1)}, 1, nMeth);
+    % P0_sum/P1_sum accumulate the per-channel windowed POWER spectra |F|^2 on
+    % the SAME segments and RFI operators as S_sum, so the channel powers below
+    % share c_full's window and 1/npts^2 normalization (direct=ch0, reflected=ch1).
+    S_sum  = repmat({zeros(npts, 1)}, 1, nMeth);
+    P0_sum = repmat({zeros(npts, 1)}, 1, nMeth);
+    P1_sum = repmat({zeros(npts, 1)}, 1, nMeth);
     for seg = 1:n_segs_avail
         i1 = (seg-1)*npts + 1;
         i2 =  seg   *npts;
@@ -353,11 +380,17 @@ function [rows, rej] = process_pair(f_ch0, base_name, cfg, win, npts, overflow_s
         for mi = 1:nMeth
             F0m = apply_rfi(F0, methods{mi}, excis);
             F1m = apply_rfi(F1, methods{mi}, excis);
-            S_seg = F0m .* conj(F1m);   % cross-spectrum (unshifted fft order)
+            S_seg  = F0m .* conj(F1m);   % cross-spectrum (unshifted fft order)
+            P0_seg = abs(F0m).^2;        % direct   power spectrum (same window)
+            P1_seg = abs(F1m).^2;        % reflected power spectrum (same window)
             if cfg.use_gpu
-                S_seg = gather(S_seg);
+                S_seg  = gather(S_seg);
+                P0_seg = gather(P0_seg);
+                P1_seg = gather(P1_seg);
             end
-            S_sum{mi} = S_sum{mi} + S_seg;
+            S_sum{mi}  = S_sum{mi}  + S_seg;
+            P0_sum{mi} = P0_sum{mi} + P0_seg;
+            P1_sum{mi} = P1_sum{mi} + P1_seg;
         end
     end
 
@@ -385,6 +418,22 @@ function [rows, rej] = process_pair(f_ch0, base_name, cfg, win, npts, overflow_s
             c_muos = complex(NaN, NaN);
         end
 
+        % Windowed per-channel band powers from the SAME averaged spectra, with
+        % the SAME 1/npts^2 normalization as c_full (window factor cancels in
+        % |c|^2/(pow_ch0*pow_ch1) ratios). _muos restricts to the MUOS bins like
+        % c_muos, NaN when the band is absent. Direct = ch0, reflected = ch1.
+        P0_avg = P0_sum{mi} / n_segs_avail;
+        P1_avg = P1_sum{mi} / n_segs_avail;
+        pow_ch0_fd = sum(P0_avg) / npts^2;
+        pow_ch1_fd = sum(P1_avg) / npts^2;
+        if has_muos
+            pow_ch0_fd_muos = sum(P0_avg(muos_mask)) / npts^2;
+            pow_ch1_fd_muos = sum(P1_avg(muos_mask)) / npts^2;
+        else
+            pow_ch0_fd_muos = NaN;
+            pow_ch1_fd_muos = NaN;
+        end
+
         row = struct();
         row.timestamp              = ts;
         row.base_name              = base_name;
@@ -401,6 +450,10 @@ function [rows, rej] = process_pair(f_ch0, base_name, cfg, win, npts, overflow_s
         row.peak_phase_deg_fd      = angle(c_full) * (180/pi);
         row.peak_amplitude_fd_muos = abs(c_muos);
         row.peak_phase_deg_fd_muos = angle(c_muos) * (180/pi);
+        row.pow_ch0_fd             = pow_ch0_fd;
+        row.pow_ch0_fd_muos        = pow_ch0_fd_muos;
+        row.pow_ch1_fd             = pow_ch1_fd;
+        row.pow_ch1_fd_muos        = pow_ch1_fd_muos;
         rows{mi} = row;
     end
 end
