@@ -1,6 +1,7 @@
 %% BrundageSoOp.m — main entry SCRIPT for Brundage SoOp post-processing.
 % Detects Borah/local and batch/GUI modes; reruns append only new files.
 % Configuration details: docs/config-reference.md.
+% Author: Thomas Van Der Weide
 
 %% Path setup (must be first — puts stages/rfi/lib/viewer/tools on the path)
 soop_setup_paths;
@@ -42,20 +43,6 @@ cfg.lag_half_win = site.sdr.lag_half_win;  % analysis window half-width (samples
 cfg.freq_hz      = site.sdr.freq_hz;       % center frequency (Hz)
 cfg.tower_h_m    = site.site.tower_h_m;    % tower height (m)
 cfg.T_load_K     = site.sdr.T_load_K;      % calibration load temperature (K)
-
-% --- Radar-equation calibration (compute_sigma0: apparent sigma0 + coherent reflectivity) ---
-% Set antenna gains and polarizations in site_config.json.
-% Measured values and limitations: docs/config-reference.md.
-cfg.ant_gain_direct_dbi    = site.site.ant_gain_direct_dbi;     % dBic toward the satellite
-cfg.ant_gain_reflected_dbi = site.site.ant_gain_reflected_dbi;  % dBic toward the specular point
-cfg.ant_pol_direct         = site.site.ant_pol_direct;
-cfg.ant_pol_reflected      = site.site.ant_pol_reflected;
-cfg.sigma0_win_hours      = 24;        % sliding-window width (h)
-cfg.sigma0_min_count      = 5;         % minimum valid captures per window
-cfg.sigma0_min_elev_deg   = 5;         % minimum elevation (deg); lower captures excluded
-cfg.sigma0_min_dsnr_db    = 10;        % minimum direct-channel SNR (dB)
-cfg.sigma0_cal_max_age_hr = 1;         % maximum calibration age (h)
-cfg.sigma0_corr_family    = 'fd_muos'; % correlation family for L1 amplitude and L2 phase
 
 % --- L2 geometric correction (site geometry from site_config.json) ---
 % capture_tz is the time zone used in capture filename timestamps.
@@ -142,6 +129,20 @@ cfg.rfi_merge_khz    = 15;         % merge flagged runs closer than this into on
 cfg.rfi_edge_guard_khz = 0;        % drop the outer band edges (FFT-edge artifacts)
 cfg.rfi_band_pad_khz = 1;          % widen each proposed band for the L1 notch
 cfg.rfi_min_width_khz = 0.1;       % drop runs narrower than this
+
+% --- Radar-equation calibration (compute_sigma0: apparent sigma0 + coherent reflectivity) ---
+% Set antenna gains and polarizations in site_config.json.
+% Measured values and limitations: docs/config-reference.md.
+cfg.ant_gain_direct_dbi    = site.site.ant_gain_direct_dbi;     % dBic toward the satellite
+cfg.ant_gain_reflected_dbi = site.site.ant_gain_reflected_dbi;  % dBic toward the specular point
+cfg.ant_pol_direct         = site.site.ant_pol_direct;
+cfg.ant_pol_reflected      = site.site.ant_pol_reflected;
+cfg.sigma0_win_hours      = 24;        % sliding-window width (h)
+cfg.sigma0_min_count      = 5;         % minimum valid captures per window
+cfg.sigma0_min_elev_deg   = 5;         % minimum elevation (deg); lower captures excluded
+cfg.sigma0_min_dsnr_db    = 10;        % minimum direct-channel SNR (dB)
+cfg.sigma0_cal_max_age_hr = 1;         % maximum calibration age (h)
+cfg.sigma0_corr_family    = 'fd_muos'; % correlation family for L1 amplitude and L2 phase
 
 %% Processing toggles
 % Process on the HPC by default; set toggles manually for local runs.
