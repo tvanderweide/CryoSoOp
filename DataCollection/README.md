@@ -44,13 +44,13 @@ sudo apt update
 sudo apt install -y build-essential cmake libyaml-cpp-dev libuhd-dev uhd-host
 ```
 
-| Package | Provides | Needed for |
-|---|---|---|
-| `build-essential` | `g++`, `make`, C/C++ toolchain | all builds |
-| `cmake` | CMake (`>= 3.15`) | all builds |
-| `libyaml-cpp-dev` | yaml-cpp headers + `yaml-cppConfig.cmake` | all builds (`find_package(yaml-cpp)`) |
-| `libuhd-dev` | UHD headers + libraries | full build (`src/device/`, `cryosoop`) |
-| `uhd-host` | `uhd_usrp_probe`, `uhd_images_downloader` | B210 bring-up / FPGA image |
+| Package           | Provides                                  | Needed for                             |
+| ----------------- | ----------------------------------------- | -------------------------------------- |
+| `build-essential` | `g++`, `make`, C/C++ toolchain            | all builds                             |
+| `cmake`           | CMake (`>= 3.15`)                         | all builds                             |
+| `libyaml-cpp-dev` | yaml-cpp headers + `yaml-cppConfig.cmake` | all builds (`find_package(yaml-cpp)`)  |
+| `libuhd-dev`      | UHD headers + libraries                   | full build (`src/device/`, `cryosoop`) |
+| `uhd-host`        | `uhd_usrp_probe`, `uhd_images_downloader` | B210 bring-up / FPGA image             |
 
 Then download the B210 FPGA/firmware image (UHD will not bring the radio up without it):
 
