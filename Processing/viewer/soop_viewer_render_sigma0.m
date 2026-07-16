@@ -560,9 +560,6 @@ function render_specular_track(V)
     if ~isempty(li), sat_label = S.dd_map_sat.Items{li}; end
     ttl = sprintf('Specular track — %s — %s', sat_label, ...
                   string(meta.day, 'yyyy-MM-dd'));
-    if meta.auto_day
-        ttl = [ttl ' (last complete day in range)'];
-    end
     if ~meta.complete
         ttl = sprintf('%s — partial (%s\x2013%s)', ttl, ...
                       string(meta.cov_start, 'HH:mm'), ...
