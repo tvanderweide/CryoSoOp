@@ -10,7 +10,10 @@
     "ant_gain_direct_dbi": 4.1,
     "ant_gain_reflected_dbi": 4.1,
     "ant_pol_direct": "RHCP",
-    "ant_pol_reflected": "LHCP"
+    "ant_pol_reflected": "LHCP",
+    "ant_az_mag_deg": 159,
+    "ant_el_direct_deg": 38,
+    "ant_tilt_reflected_deg": 38
   },
   "sdr": {
     "fs": 20e6,

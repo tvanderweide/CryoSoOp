@@ -65,7 +65,9 @@ drift between the two). Checklist:
      antenna phase center), `tower_h_m`, `capture_tz`, and the antenna
      gain/pol fields (`ant_gain_direct_dbi`, `ant_gain_reflected_dbi`,
      `ant_pol_direct`, `ant_pol_reflected` — boresight dBic; see
-     `docs/config-reference.md`).
+     `docs/config-reference.md`). Optional pointing provenance:
+     `ant_az_mag_deg`, `ant_el_direct_deg`, `ant_tilt_reflected_deg`
+     (as-installed boresight; not read by any stage yet).
    - `sdr`: sample rate, center frequency, integration/segment settings,
      `peak_lag`, `lag_half_win`, and `T_load_K` — copy the Brundage block
      unchanged unless the receiver hardware or capture settings differ
