@@ -1,0 +1,51 @@
+{
+  "about": "CSSL deployment starter. Rename to site_config.json so the pipeline picks it up (keep the Brundage copy under another name). Fields set to null are site-specific and MUST be filled in before processing; field rationale in docs/config-reference.md and README.md 'Deploying at a new site'.",
+  "site": {
+    "name": "CSSL",
+    "lat": null,
+    "lon": null,
+    "alt_m": null,
+    "tower_h_m": null,
+    "capture_tz": "UTC",
+    "ant_gain_direct_dbi": null,
+    "ant_gain_reflected_dbi": null,
+    "ant_pol_direct": null,
+    "ant_pol_reflected": null,
+    "ant_az_mag_deg": null,
+    "ant_el_direct_deg": null,
+    "ant_tilt_reflected_deg": null
+  },
+  "sdr": {
+    "fs": 20e6,
+    "freq_hz": 370e6,
+    "Ti": 0.9,
+    "num_segs": 2,
+    "peak_lag": null,
+    "lag_half_win": 2500,
+    "T_load_K": null
+  },
+  "season": {
+    "start": null,
+    "end": null,
+    "norad": null,
+    "candidate_norads": null
+  },
+  "paths": {
+    "hpc": {
+      "data_dir": null,
+      "input_dir": null,
+      "out_dir": null,
+      "matlab_jobs": null
+    },
+    "local": {
+      "data_dir": null,
+      "input_dir": null,
+      "out_dir": null
+    }
+  },
+  "weather": {
+    "wx_dat": null,
+    "wx_temp_cols": null,
+    "wx_tz": null
+  }
+}

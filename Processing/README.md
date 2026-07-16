@@ -55,7 +55,10 @@ Everything site-, machine-, and season-specific — including the SDR /
 correlation constants — lives in **one file:
 [`site_config.json`](site_config.json)** (read by `BrundageSoOp.m` and
 `tools/make_muos_elevation.py`, so site coordinates and season dates cannot
-drift between the two). Checklist:
+drift between the two). A pre-seeded starter for the CSSL deployment is
+provided as [`site_config_CSSL.json`](site_config_CSSL.json) — fill in the
+`null` fields, then rename it to `site_config.json` (keeping the previous
+site's copy under another name). Checklist:
 
 1. **Edit `site_config.json`** —
    - `paths.local` / `paths.hpc`: data root, stable-inputs dir, and dated
