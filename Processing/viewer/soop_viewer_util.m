@@ -48,9 +48,12 @@ function apply_overrides(V)
     % Re-applies sidebar styling after a render (or on a live style change).
     % Text overrides target the primary (top) axes and only for the plot
     % they were set on; font sizes and legend settings apply to every
-    % axes/legend in the panel and persist across plots.
-    axs = findobj(S.panel, 'Type', 'axes');
-    if isempty(axs), return; end
+    % axes/legend in the panel and persist across plots. The Radar Cal map
+    % views draw in geographic axes (Type 'geoaxes', not 'axes'), collected
+    % separately here so they get styled too.
+    axs  = findobj(S.panel, 'Type', 'axes');
+    gaxs = findobj(S.panel, 'Type', 'geoaxes');
+    if isempty(axs) && isempty(gaxs), return; end
 
     % Label-text overrides (primary axes, current plot only). TeX
     % interpreter so SNR_L / SNR_{RNS} subscripts, ^ superscripts, and
@@ -58,7 +61,11 @@ function apply_overrides(V)
     % underscore must be escaped as \_.
     has_title_override = strcmp(S.dd_plot.Value, S.ov_plot_kind) && ~isempty(S.ov_title);
     if strcmp(S.dd_plot.Value, S.ov_plot_kind)
-        axp = axs(end);   % first-created = top tile / sole axes
+        if ~isempty(axs)   % first-created = top tile / sole axes
+            axp = axs(end);
+        else
+            axp = gaxs(end);
+        end
         % Raw: Spectrogram carries its descriptive title at the figure
         % (tiledlayout) level — its two axes hold only static per-channel
         % labels ('CH0 (Direct)' / 'CH1 (Reflected)'). Route the Title
@@ -72,8 +79,22 @@ function apply_overrides(V)
                 title(axp, S.ov_title, 'Interpreter', 'tex');
             end
         end
-        if ~isempty(S.ov_xlabel), xlabel(axp, S.ov_xlabel, 'Interpreter', 'tex'); end
-        if ~isempty(S.ov_ylabel), ylabel(axp, S.ov_ylabel, 'Interpreter', 'tex'); end
+        if isa(axp, 'matlab.graphics.axis.GeographicAxes')
+            % Geographic axes have lat/lon edge labels instead of X/Y
+            % labels — route the sidebar X label to longitude (horizontal
+            % axis) and Y label to latitude (vertical axis).
+            if ~isempty(S.ov_xlabel)
+                axp.LongitudeLabel.String      = S.ov_xlabel;
+                axp.LongitudeLabel.Interpreter = 'tex';
+            end
+            if ~isempty(S.ov_ylabel)
+                axp.LatitudeLabel.String      = S.ov_ylabel;
+                axp.LatitudeLabel.Interpreter = 'tex';
+            end
+        else
+            if ~isempty(S.ov_xlabel), xlabel(axp, S.ov_xlabel, 'Interpreter', 'tex'); end
+            if ~isempty(S.ov_ylabel), ylabel(axp, S.ov_ylabel, 'Interpreter', 'tex'); end
+        end
     end
 
     % Tag product-CSV plots (Calib/L1/L2/Data availability) with the active
@@ -87,8 +108,10 @@ function apply_overrides(V)
     % (font/legend) don't stack it. Title stays char here (raw multi-line
     % titles excluded). Skipped entirely when a sidebar title override is
     % active for this plot — that field is meant to be the WHOLE title.
+    % Also skipped for the map views (plot_uses_method false): they are
+    % forward models with no base/notch dataset, so the tag would mislead.
     pk = S.dd_plot.Value;
-    if ~startsWith(pk, 'Raw:') && ~has_title_override
+    if ~isempty(axs) && plot_uses_method(pk) && ~startsWith(pk, 'Raw:') && ~has_title_override
         axp = axs(end);
         t0  = char(axp.Title.String);
         t0  = regexprep(t0, '\s*—\s*dataset:.*$', '');
@@ -107,6 +130,12 @@ function apply_overrides(V)
         axs(k).Title.FontSize  = fst;
         axs(k).XLabel.FontSize = fsl;
         axs(k).YLabel.FontSize = fsl;
+    end
+    for k = 1:numel(gaxs)
+        gaxs(k).FontSize                 = fsa;
+        gaxs(k).Title.FontSize           = fst;
+        gaxs(k).LatitudeLabel.FontSize   = fsl;
+        gaxs(k).LongitudeLabel.FontSize  = fsl;
     end
     % Raw: Spectrogram's descriptive title is the figure (tiledlayout) title,
     % not an axes title (the axes hold static CH0/CH1 labels) — so the Title
