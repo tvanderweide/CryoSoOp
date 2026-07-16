@@ -434,10 +434,10 @@ end
 
 
 % =========================================================================
-% K. Stale-output invalidation + calib-absent product (Codex F1)
+% K. Stale-output invalidation + calib-absent product (regressions)
 % =========================================================================
 function test_e2e_stale_output_invalidated(tc)
-% Codex F1 regression: a recompute-full stage must never leave a stale product
+% Regression: a recompute-full stage must never leave a stale product
 % consumable when a prerequisite disappears. Produce finite output, then remove
 % the L1 CSV and re-run: the canonical BrundageSoOp_sigma0.csv must be renamed
 % aside (_stale_<stamp>) so nothing finite is loadable under the canonical name.
@@ -468,7 +468,7 @@ function test_e2e_stale_output_invalidated(tc)
 end
 
 function test_e2e_calib_absent_products_nan(tc)
-% Codex F1: a method dir WITHOUT BrundageSoOp_calib.csv (e.g. rfi_apply_calib
+% Regression: a method dir WITHOUT BrundageSoOp_calib.csv (e.g. rfi_apply_calib
 % = false writes calib only in the base dir) must still WRITE a product: NaN
 % gains + flag_cal_missing = 1, unassessable DSNR (flag_dsnr_na = 1) so science
 % products are NaN, while geometry columns stay finite and the rows are kept.
@@ -499,10 +499,10 @@ end
 
 
 % =========================================================================
-% L. DSNR guard: P_DN edge cases (Codex F4)
+% L. DSNR guard: P_DN edge cases
 % =========================================================================
 function test_e2e_dsnr_pdn_edge_cases(tc)
-% Codex F4: the DSNR ratio-estimator guard must treat P_DN = 0 / negative / NaN
+% The DSNR ratio-estimator guard must treat P_DN = 0 / negative / NaN
 % as UNASSESSABLE (dsnr_db NaN, flag_dsnr_na = 1, excluded), an ordinary
 % positive P_DN as assessable, and an assessable capture whose direct power does
 % not exceed the noise estimate as definitively low (dsnr_db = -Inf,
@@ -551,10 +551,10 @@ end
 
 
 % =========================================================================
-% M. Family-band consistency: fd_muos (MUOS bins) vs fd (full band) — Codex F3
+% M. Family-band consistency: fd_muos (MUOS bins) vs fd (full band)
 % =========================================================================
 function test_e2e_family_band_fd_vs_fdmuos(tc)
-% Codex F3: the DSNR noise floor P_noise = NG*f_band*P_DN must use the band of
+% The DSNR noise floor P_noise = NG*f_band*P_DN must use the band of
 % the SELECTED family — f_band = 1 for the full-band fd/td families, f_band =
 % (# MUOS bins)/npts for fd_muos. Same fixture, same P_dsig and P_DN; only the
 % family changes. The MUOS band is narrower (lower noise floor -> higher DSNR),
