@@ -12,6 +12,15 @@
     "ant_pol_direct": "RHCP",
     "ant_pol_reflected": "LHCP"
   },
+  "sdr": {
+    "fs": 20e6,
+    "freq_hz": 370e6,
+    "Ti": 0.9,
+    "num_segs": 2,
+    "peak_lag": -0.575,
+    "lag_half_win": 2500,
+    "T_load_K": 303
+  },
   "season": {
     "start": "2025-12-15",
     "end": "2026-06-12",

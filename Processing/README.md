@@ -51,8 +51,8 @@ points at. To inspect an excised product set instead of the base one, point
 
 ## Deploying at a new site
 
-The pipeline's signal-processing constants carry over unchanged. Everything
-site-, machine-, and season-specific lives in **one file:
+Everything site-, machine-, and season-specific — including the SDR /
+correlation constants — lives in **one file:
 [`site_config.json`](site_config.json)** (read by `BrundageSoOp.m` and
 `tools/make_muos_elevation.py`, so site coordinates and season dates cannot
 drift between the two). Checklist:
@@ -62,7 +62,14 @@ drift between the two). Checklist:
      output root for each machine you run on (`BrundageSoOp.m` picks the
      block automatically).
    - `site`: name, antenna `lat`/`lon`/`alt_m` (WGS84 ellipsoidal, at the
-     antenna phase center), `tower_h_m`, and `capture_tz`.
+     antenna phase center), `tower_h_m`, `capture_tz`, and the antenna
+     gain/pol fields (`ant_gain_direct_dbi`, `ant_gain_reflected_dbi`,
+     `ant_pol_direct`, `ant_pol_reflected` — boresight dBic; see
+     `docs/config-reference.md`).
+   - `sdr`: sample rate, center frequency, integration/segment settings,
+     `peak_lag`, `lag_half_win`, and `T_load_K` — copy the Brundage block
+     unchanged unless the receiver hardware or capture settings differ
+     (rationale per field: `docs/config-reference.md`).
    - `season`: `start`/`end` dates, candidate NORAD ids, and the confirmed
      `norad` (see step 4).
    - `weather` (optional): a local TOA5 `.dat` logger file, its temperature

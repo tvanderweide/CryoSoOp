@@ -5,12 +5,14 @@ passed to `soop_run_pipeline` and, from there, to each stage. This page is the
 full explanation for every field that only gets a one-line comment at its
 point of assignment in the entry script.
 
-Site-, machine-, and season-specific values (paths, site geometry,
-`capture_tz`, weather file, confirmed satellite) are not literals in
-`BrundageSoOp.m`: they are read from `Processing/site_config.json` and copied
-onto `cfg` — edit the JSON, not the script, when they change (see the README's
-"Deploying at a new site"). The values documented below are the shipped
-Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
+Site-, machine-, and season-specific values (paths, site geometry, antenna
+gains/pols, `capture_tz`, weather file, confirmed satellite) and the SDR /
+correlation constants (`sdr` block) are not literals in `BrundageSoOp.m`:
+they are read from `Processing/site_config.json` and copied onto `cfg` — edit
+the JSON, not the script, when they change (see the README's "Deploying at a
+new site"). The values documented below are the shipped Brundage entries.
+The remaining science parameters (RFI tuning, sigma0 estimator knobs,
+chain-phase reference, thresholds) stay as assignments in `BrundageSoOp.m`.
 
 ## cfg fields
 
@@ -25,6 +27,10 @@ Brundage entries. Science parameters remain assignments in `BrundageSoOp.m`.
 | `cfg.out_dir` (final, re-derived) | `<root>\L1\` — the L1/base product leaf. `rfi_excise.method_out_dir()` string-suffixes this leaf name, so `'notch_interp'` lands in a sibling `L1_notch\` folder inside the same dated root | every stage |
 
 ### Signal-processing constants
+
+Values live in `site_config.json`'s `sdr` block (per-deployment instance);
+`BrundageSoOp.m` maps them onto the `cfg` fields below. The "Default" column
+shows the Brundage settings.
 
 | Field | Default | Notes |
 |---|---|---|
@@ -60,17 +66,17 @@ Solutions 17(1), appendix): `d = lambda/2; b = sqrt(2*d*h/sin(e) +
 once with `cfg.tower_h_m` and once with the SNOdar-corrected height — for
 the fixed-height and snow-corrected footprint variants.
 
-Antenna gain/pol fields are deployment hardware; `site_config.json`'s
-`site.*` block overrides the placeholders below (see the README's
-"Deploying at a new site"). The rest are science parameters that stay in
+Antenna gain/pol fields are deployment hardware, REQUIRED in
+`site_config.json`'s `site.*` block (see the README's "Deploying at a new
+site"). The `sigma0_*` fields are science parameters that stay in
 `BrundageSoOp.m`.
 
 | Field | Default | Notes |
 |---|---|---|
-| `cfg.ant_gain_direct_dbi` | `2` dBi | Direct-channel antenna gain toward the satellite. The in-code default is a generic placeholder; the Brundage `site_config.json` carries the measured value **4.1 dBic** for the deployed OSU compact P-band dual-CP patch (Shen & Chen, *P-Band Signals of Opportunity Antenna Fabrication and Testing*, OSU ElectroScience Laboratory report AWD106817-Final, July 2022: measured boresight realized gain ~4.1 dBic on both CP ports, ~90° 3-dB beamwidth, >20 dB cross-pol isolation, axial ratio < 1.25 over 360–380 MHz). This is a BORESIGHT gain — the stage assumes the antenna is boresighted on the satellite. Override via `site_config.json` `site.ant_gain_direct_dbi` |
-| `cfg.ant_gain_reflected_dbi` | `2` dBi | Reflected-channel antenna gain toward the specular point — same OSU patch, LHCP port, measured **4.1 dBic** boresight (in `site_config.json`). Boresight assumption: if the downlooking antenna is not aimed at the specular point, the ~90° beam rolls the effective gain off (≈ −3 dB at 45° off boresight). Override via `site_config.json` `site.ant_gain_reflected_dbi` |
-| `cfg.ant_pol_direct` | `'RHCP'` | Direct-channel antenna polarization — provenance only (RHCP = MUOS co-pol); no polarization-mismatch factor is applied to the products. Override via `site_config.json` `site.ant_pol_direct` |
-| `cfg.ant_pol_reflected` | `'LHCP'` | Reflected-channel antenna polarization — provenance only (LHCP matches the reflection handedness flip); no mismatch factor applied. Override via `site_config.json` `site.ant_pol_reflected` |
+| `cfg.ant_gain_direct_dbi` | `site.ant_gain_direct_dbi` (Brundage: `4.1` dBic) | Direct-channel antenna gain toward the satellite, REQUIRED in `site_config.json`. Brundage carries the measured value **4.1 dBic** for the deployed OSU compact P-band dual-CP patch (Shen & Chen, *P-Band Signals of Opportunity Antenna Fabrication and Testing*, OSU ElectroScience Laboratory report AWD106817-Final, July 2022: measured boresight realized gain ~4.1 dBic on both CP ports, ~90° 3-dB beamwidth, >20 dB cross-pol isolation, axial ratio < 1.25 over 360–380 MHz). This is a BORESIGHT gain — the stage assumes the antenna is boresighted on the satellite |
+| `cfg.ant_gain_reflected_dbi` | `site.ant_gain_reflected_dbi` (Brundage: `4.1` dBic) | Reflected-channel antenna gain toward the specular point — same OSU patch, LHCP port, measured **4.1 dBic** boresight (in `site_config.json`). Boresight assumption: if the downlooking antenna is not aimed at the specular point, the ~90° beam rolls the effective gain off (≈ −3 dB at 45° off boresight) |
+| `cfg.ant_pol_direct` | `site.ant_pol_direct` (Brundage: `'RHCP'`) | Direct-channel antenna polarization — provenance only (RHCP = MUOS co-pol); no polarization-mismatch factor is applied to the products |
+| `cfg.ant_pol_reflected` | `site.ant_pol_reflected` (Brundage: `'LHCP'`) | Reflected-channel antenna polarization — provenance only (LHCP matches the reflection handedness flip); no mismatch factor applied |
 | `cfg.sigma0_win_hours` | `24` h | Centered sliding-window width for the incoherent-sigma0 window statistics |
 | `cfg.sigma0_min_count` | `5` | Minimum valid captures required in a window; below this the window's products are left NaN (the row is still written) |
 | `cfg.sigma0_min_elev_deg` | `5` deg | Elevation gate — below this the flat-horizontal-reflector footprint assumption breaks down near grazing, so the capture is excluded |

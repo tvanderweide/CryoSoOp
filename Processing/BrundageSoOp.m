@@ -50,33 +50,26 @@ cfg.input_dir = paths.input_dir;
 cfg.out_dir   = paths.out_dir;
 cfg.fig_dir = fullfile(cfg.out_dir, 'Figures');
 cfg.out_dir = fullfile(cfg.out_dir, 'L1');
-cfg.fs           = 20e6;        % sample rate (Hz)
-cfg.Ti           = 0.9;         % coherent integration time per segment (s)
-cfg.num_segs     = 2;           % segments to coherently average per file
-cfg.peak_lag     = -0.575;      % target lag (samples); sign validated 2026-01-28: -0.575 (+1.4 dB SNR vs +0.575)
-cfg.lag_half_win = 2500;        % analysis window half-width (matches Python llm/uum ±2500)
-cfg.freq_hz      = 370e6;       % center frequency (Hz); lambda = c/f = 0.8102 m for L2
-cfg.tower_h_m    = site.site.tower_h_m;  % tower height (m) — from site_config.json
-cfg.T_load_K     = 303;         % load temperature (K), assumed ambient
+% SDR / correlation constants — site_config.json "sdr" block (per-field
+% rationale and provenance: docs/config-reference.md).
+cfg.fs           = site.sdr.fs;            % sample rate (Hz)
+cfg.Ti           = site.sdr.Ti;            % coherent integration time per segment (s)
+cfg.num_segs     = site.sdr.num_segs;      % segments coherently averaged per file
+cfg.peak_lag     = site.sdr.peak_lag;      % target lag (samples)
+cfg.lag_half_win = site.sdr.lag_half_win;  % analysis window half-width (samples)
+cfg.freq_hz      = site.sdr.freq_hz;       % center frequency (Hz)
+cfg.tower_h_m    = site.site.tower_h_m;    % tower height (m)
+cfg.T_load_K     = site.sdr.T_load_K;      % calibration load temperature (K)
 
 % --- Radar-equation calibration (compute_sigma0: apparent sigma0 + coherent reflectivity) ---
-% Antenna gains/pols are deployment hardware -> site_config.json (site.*) overrides
-% the generic placeholders below. Brundage uses the OSU compact P-band dual-CP patch
-% (Shen & Chen 2022, OSU ESL report AWD106817-Final): measured boresight realized
-% gain ~4.1 dBic on both LHCP and RHCP ports, ~90 deg 3-dB beamwidth, >20 dB x-pol
-% isolation — site_config.json carries 4.1/4.1. Gains are BORESIGHT values: the
-% stage assumes each antenna is boresighted on its target (satellite / specular
-% point); off-pointing rolls off per the ~90 deg beam. Pol fields are provenance
-% only (direct RHCP = MUOS co-pol; reflected LHCP matches the reflection handedness
-% flip); no polarization-mismatch factor is applied.
-cfg.ant_gain_direct_dbi    = 2;       % dBi toward the satellite (placeholder default)
-cfg.ant_gain_reflected_dbi = 2;       % dBi toward the specular point (placeholder default)
-cfg.ant_pol_direct         = 'RHCP';
-cfg.ant_pol_reflected      = 'LHCP';
-if isfield(site.site, 'ant_gain_direct_dbi'),    cfg.ant_gain_direct_dbi    = site.site.ant_gain_direct_dbi;    end
-if isfield(site.site, 'ant_gain_reflected_dbi'), cfg.ant_gain_reflected_dbi = site.site.ant_gain_reflected_dbi; end
-if isfield(site.site, 'ant_pol_direct'),         cfg.ant_pol_direct         = site.site.ant_pol_direct;         end
-if isfield(site.site, 'ant_pol_reflected'),      cfg.ant_pol_reflected      = site.site.ant_pol_reflected;      end
+% Antenna gains/pols are deployment hardware, set in site_config.json (site.*).
+% Gains are BORESIGHT dBic (the stage assumes each antenna is aimed at its
+% target); pols are provenance only, no mismatch factor. Measured values,
+% citation, and limitations: docs/config-reference.md.
+cfg.ant_gain_direct_dbi    = site.site.ant_gain_direct_dbi;     % dBic toward the satellite
+cfg.ant_gain_reflected_dbi = site.site.ant_gain_reflected_dbi;  % dBic toward the specular point
+cfg.ant_pol_direct         = site.site.ant_pol_direct;
+cfg.ant_pol_reflected      = site.site.ant_pol_reflected;
 cfg.sigma0_win_hours      = 24;        % centered sliding-window width (h) for the Eq. 41 window statistics
 cfg.sigma0_min_count      = 5;         % min valid captures per window, else NaN products (row kept)
 cfg.sigma0_min_elev_deg   = 5;         % deg; below this the flat-surface footprint/r1 model blows up -> capture excluded
@@ -85,13 +78,9 @@ cfg.sigma0_cal_max_age_hr = 1;         % h; nearest-calib join tolerance (matche
 cfg.sigma0_corr_family    = 'fd_muos'; % L1 amplitude + L2 phase family: 'fd_muos' (default) | 'fd' | 'td'
 
 % --- L2 geometric correction (site geometry from site_config.json) ---
-% Brundage values are from the Emlid Reach RS2 survey 2026-06-15; alt is WGS84
-% ellipsoidal at the antenna phase center (ground + tower). capture_tz names the
-% timebase of the capture filename stamps: for the LEGACY 2025-26 season that is
-% the Pi's IANA clock zone ('America/Boise', VERIFIED 2026-06-12 via timedatectl;
-% filenames local, season spans the March DST change). cryosoop builds from
-% 2026-07 on stamp UTC in code — new-season site_config.json must say "UTC"
-% (compute_L1 hard-errors on UTC-stamped runs processed with a local zone).
+% capture_tz = timebase of the capture filename stamps (legacy 2025-26 season
+% 'America/Boise'; cryosoop stamps UTC). Survey/timezone provenance:
+% docs/config-reference.md (Site geometry).
 cfg.site_lat   = site.site.lat;      % deg N
 cfg.site_lon   = site.site.lon;      % deg E
 cfg.site_alt_m = site.site.alt_m;    % m, WGS84 ellipsoidal (antenna phase center)
