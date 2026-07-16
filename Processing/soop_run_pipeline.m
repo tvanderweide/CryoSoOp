@@ -15,6 +15,7 @@ function soop_run_pipeline(cfg, toggles)
 %   toggles.run_satid  - compare_sat_candidates  (sat_candidates_corrected.csv)
 %   toggles.run_L2     - compute_L2              (elevation-corrected L2 series)
 %   toggles.run_rfi    - compute_rfi_spectrum    (season RFI diagnostic + bands)
+%   toggles.run_sigma0 - compute_sigma0          (apparent sigma0 + coherent reflectivity)
 %
 % Behaviour matches the original entry: L1 + calib process every cfg.rfi_methods
 % entry in a single read/FFT pass; the downstream stages (snr, sat-id, L2) are
@@ -63,7 +64,7 @@ if toggles.run_rfi,   compute_rfi_spectrum(cfg); end % — intentional toggle
 % list, elevation tables via cfg.elev_dir/cfg.elev_table, RFI bands) are
 % decoupled from out_dir into cfg.input_dir, so no per-method copying is needed.
 % With cfg.rfi_methods = {'none'} this loops once over cfg.out_dir.
-if any([toggles.run_snr, toggles.run_satid, toggles.run_L2])
+if any([toggles.run_snr, toggles.run_satid, toggles.run_L2, toggles.run_sigma0])
     E_rfi = rfi_excise();
     for mi = 1:numel(cfg.rfi_methods)
         cm = cfg;
@@ -72,6 +73,7 @@ if any([toggles.run_snr, toggles.run_satid, toggles.run_L2])
         if toggles.run_snr,    compute_snr(cm);            end % — intentional toggle
         if toggles.run_satid,  compare_sat_candidates(cm); end
         if toggles.run_L2,     compute_L2(cm);             end
+        if toggles.run_sigma0, compute_sigma0(cm);         end % after L2: consumes its detrended phase
     end
 end
 end

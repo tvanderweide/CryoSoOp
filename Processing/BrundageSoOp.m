@@ -59,6 +59,31 @@ cfg.freq_hz      = 370e6;       % center frequency (Hz); lambda = c/f = 0.8102 m
 cfg.tower_h_m    = site.site.tower_h_m;  % tower height (m) — from site_config.json
 cfg.T_load_K     = 303;         % load temperature (K), assumed ambient
 
+% --- Radar-equation calibration (compute_sigma0: apparent sigma0 + coherent reflectivity) ---
+% Antenna gains/pols are deployment hardware -> site_config.json (site.*) overrides
+% the generic placeholders below. Brundage uses the OSU compact P-band dual-CP patch
+% (Shen & Chen 2022, OSU ESL report AWD106817-Final): measured boresight realized
+% gain ~4.1 dBic on both LHCP and RHCP ports, ~90 deg 3-dB beamwidth, >20 dB x-pol
+% isolation — site_config.json carries 4.1/4.1. Gains are BORESIGHT values: the
+% stage assumes each antenna is boresighted on its target (satellite / specular
+% point); off-pointing rolls off per the ~90 deg beam. Pol fields are provenance
+% only (direct RHCP = MUOS co-pol; reflected LHCP matches the reflection handedness
+% flip); no polarization-mismatch factor is applied.
+cfg.ant_gain_direct_dbi    = 2;       % dBi toward the satellite (placeholder default)
+cfg.ant_gain_reflected_dbi = 2;       % dBi toward the specular point (placeholder default)
+cfg.ant_pol_direct         = 'RHCP';
+cfg.ant_pol_reflected      = 'LHCP';
+if isfield(site.site, 'ant_gain_direct_dbi'),    cfg.ant_gain_direct_dbi    = site.site.ant_gain_direct_dbi;    end
+if isfield(site.site, 'ant_gain_reflected_dbi'), cfg.ant_gain_reflected_dbi = site.site.ant_gain_reflected_dbi; end
+if isfield(site.site, 'ant_pol_direct'),         cfg.ant_pol_direct         = site.site.ant_pol_direct;         end
+if isfield(site.site, 'ant_pol_reflected'),      cfg.ant_pol_reflected      = site.site.ant_pol_reflected;      end
+cfg.sigma0_win_hours      = 24;        % centered sliding-window width (h) for the Eq. 41 window statistics
+cfg.sigma0_min_count      = 5;         % min valid captures per window, else NaN products (row kept)
+cfg.sigma0_min_elev_deg   = 5;         % deg; below this the flat-surface footprint/r1 model blows up -> capture excluded
+cfg.sigma0_min_dsnr_db    = 10;        % dB; direct-channel SNR guard (ratio-estimator protection)
+cfg.sigma0_cal_max_age_hr = 1;         % h; nearest-calib join tolerance (matches compute_L2 chain-cal window)
+cfg.sigma0_corr_family    = 'fd_muos'; % L1 amplitude + L2 phase family: 'fd_muos' (default) | 'fd' | 'td'
+
 % --- L2 geometric correction (site geometry from site_config.json) ---
 % Brundage values are from the Emlid Reach RS2 survey 2026-06-15; alt is WGS84
 % ellipsoidal at the antenna phase center (ground + tower). capture_tz names the
@@ -165,6 +190,7 @@ run_snr   = false;   % needs the L1 CSV; run after the first full L1 pass
 run_satid = false;    % compare_sat_candidates: produces sat_candidates_corrected.csv
 run_L2    = false;    % needs cfg.elev_table for the CONFIRMED satellite
 run_rfi   = false;   % compute_rfi_spectrum: season RFI diagnostic + proposed bands
+run_sigma0 = false;  % compute_sigma0: needs L1 channel-power columns + L2 + calib in each method dir
 
 %% Run pipeline (parpool sizing + stage dispatch + per-method downstream loop)
 toggles.run_L1    = run_L1;
@@ -173,6 +199,7 @@ toggles.run_snr   = run_snr;
 toggles.run_satid = run_satid;
 toggles.run_L2    = run_L2;
 toggles.run_rfi   = run_rfi;
+toggles.run_sigma0 = run_sigma0;
 soop_run_pipeline(cfg, toggles);
 
 %% Interactive viewer (skipped under matlab -batch: no display)
