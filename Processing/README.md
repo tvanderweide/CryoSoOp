@@ -223,7 +223,10 @@ default that applies when a field is left unset) is in
 
 `BrundageSoOp_viewer.m` is an interactive uifigure for inspecting any
 product set — cross-correlation, calibration, RFI spectrum, L2 phase,
-weather overlay, and on-demand raw-capture views. It is UI-only; all
+weather overlay, radar-cal products and forward-model maps (Fresnel
+footprint and within-day specular-point track on a geo-registered
+satellite basemap — these need only an elevation table, no products), and
+on-demand raw-capture views. It is UI-only; all
 computation runs through `lib/BrundageSoOp_fun.m`. The viewer itself is
 split into 12 files under `viewer/` (shared state object, callbacks,
 catalog, data loading, layout, five per-plot-family renderers, and UI

@@ -64,7 +64,11 @@ Footprint: first-Fresnel-zone ellipse (Larson & Nievinski 2013, GPS
 Solutions 17(1), appendix): `d = lambda/2; b = sqrt(2*d*h/sin(e) +
 (d/sin(e))^2); a = b/sin(e); A_eff = pi*a*b`, computed twice per capture —
 once with `cfg.tower_h_m` and once with the SNOdar-corrected height — for
-the fixed-height and snow-corrected footprint variants.
+the fixed-height and snow-corrected footprint variants. The viewer also
+draws two forward-model map views from the same geometry (no sigma0 CSV
+needed): the footprint ellipse at a selected date, and the within-day
+specular-point track `x_sp = h/tan(e)` (`lib/soop_specular_track.m` — note
+the specular point sits inside the ellipse-center offset `R`).
 
 Antenna gain/pol fields are deployment hardware, REQUIRED in
 `site_config.json`'s `site.*` block (see the README's "Deploying at a new

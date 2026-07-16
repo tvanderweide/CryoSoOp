@@ -337,9 +337,20 @@ function render_now(V)
     is_geom = strcmp(kind, 'Radar Cal: geometry (r2c / r1mc / A_eff)');
     S.geom_row.Visible = matlab.lang.OnOffSwitchState(is_geom);
 
-    % Satellite/h selectors apply only to the Radar Cal footprint map.
-    is_map = strcmp(kind, 'Radar Cal: footprint map');
+    % Satellite/h/date selectors apply to both Radar Cal map views. The date
+    % picker means different things on the two ('' = range mean vs '' = last
+    % complete day), so its tooltip follows the selected kind.
+    is_map = ismember(kind, {'Radar Cal: footprint map', ...
+                             'Radar Cal: specular track'});
     S.map_row.Visible = matlab.lang.OnOffSwitchState(is_map);
+    if strcmp(kind, 'Radar Cal: specular track')
+        S.dp_map.Tooltip = ['Track day (specular points over this one day). ' ...
+            'Clear = last COMPLETE day in the date range; a pinned partial ' ...
+            'day renders with its coverage labeled.'];
+    else
+        S.dp_map.Tooltip = ['Footprint date (day mean el/az + day mean ' ...
+            'snow depth). Clear = mean over the top date range.'];
+    end
 
     % Weather-overlay toggles (snow depth + the two temperatures) apply only to
     % the L2: Candidates views, which now carry the optional overlay.

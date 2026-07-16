@@ -16,6 +16,7 @@ function H = sigma0_math()
 %
 % Handles:
 %   H.r1(h_m, elev_deg)                              reflected-path length (m)
+%   H.spec_offset(h_m, elev_deg)                     specular-point offset (m)
 %   H.fresnel(lambda_m, h_m, elev_deg) -> [Aeff, a, b, R]   first Fresnel zone
 %       (R = ellipse-center horizontal offset from the antenna along azimuth)
 %   H.k_sigma0(r1, r2, rd, gdr, gder, Aeff)          per-capture sigma0 prefactor
@@ -47,6 +48,7 @@ function H = sigma0_math()
 % into the incoherent variance whenever the geometry varies across the window.
 
     H.r1           = @r1;
+    H.spec_offset  = @spec_offset;
     H.fresnel      = @fresnel;
     H.k_sigma0     = @k_sigma0;
     H.k_gamma      = @k_gamma;
@@ -59,6 +61,17 @@ end
 function r = r1(h_m, elev_deg)
 % Reflected-path geometric length r1 = h / sin(elevation), metres.
     r = h_m ./ sind(elev_deg);
+end
+
+
+% =========================================================================
+function x_m = spec_offset(h_m, elev_deg)
+% Horizontal antenna->specular-point offset x = h / tan(elevation), metres,
+% along the satellite azimuth (flat horizontal reflector). This is the true
+% specular point; the first-Fresnel-zone ellipse CENTER sits farther out at
+% R = x + (d/sin e)/tan(e) (see fresnel below). Vectorized like r1; at
+% elev_deg = 90 the offset is exactly 0 (tand(90) = Inf).
+    x_m = h_m ./ tand(elev_deg);
 end
 
 

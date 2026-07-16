@@ -13,11 +13,15 @@ function soop_viewer_render_sigma0(V, kind)
     is_compare_mode = @(varargin) V.U.is_compare_mode(V, varargin{:});
     is_chaincal_mode = @(varargin) V.U.is_chaincal_mode(V, varargin{:});
 
-    % Footprint map: a pure forward model (elevation table + site + tower/snow
-    % height) — independent of any sigma0 product AND of the Dataset selection,
-    % so it is handled before the compare/product guards below.
+    % Footprint map / specular track: pure forward models (elevation table +
+    % site + tower/snow height) — independent of any sigma0 product AND of the
+    % Dataset selection, so they are handled before the compare/product guards.
     if strcmp(kind, 'Radar Cal: footprint map')
         render_footprint_map(V);
+        return;
+    end
+    if strcmp(kind, 'Radar Cal: specular track')
+        render_specular_track(V);
         return;
     end
 
@@ -444,15 +448,7 @@ function render_footprint_map(V)
     colors = {[0.85 0.33 0.10], [0.30 0.75 0.93]};   % orange / cyan
 
     % Geo-registered satellite basemap; plain ENU axes as the fallback.
-    gax = [];   %#ok<NASGU> % defensive: geoaxes() may throw before assigning
-    try
-        gax = geoaxes(S.panel);
-        gax.Units = 'normalized';
-        gax.Position = [0.04 0.04 0.92 0.90];
-        geobasemap(gax, 'satellite');
-    catch
-        gax = [];
-    end
+    gax = try_geoaxes(S.panel);
     if ~isempty(gax)
         hold(gax, 'on');
         lh = gobjects(0);  leg = {};
@@ -494,4 +490,167 @@ function render_footprint_map(V)
         legend(ax, lh, leg, 'Location', 'northwest');
         hold(ax, 'off');
     end
+end
+
+
+function gax = try_geoaxes(panel)
+% Geoaxes with the Esri 'satellite' basemap, or [] when unavailable (offline /
+% no geoaxes) so the caller falls back to plain ENU axes. Setting the
+% SOOP_VIEWER_FORCE_ENU environment variable forces the fallback — a test hook
+% so the offline branch can be exercised at runtime.
+    gax = [];
+    if ~isempty(getenv('SOOP_VIEWER_FORCE_ENU'))
+        return;
+    end
+    try
+        gax = geoaxes(panel);
+        gax.Units = 'normalized';
+        gax.Position = [0.04 0.04 0.92 0.90];
+        geobasemap(gax, 'satellite');
+    catch
+        gax = [];
+    end
+end
+
+
+function render_specular_track(V)
+% Specular-point track over ONE day: the locus x_sp = h/tan(e) projected along
+% the satellite azimuth, drawn on the same geo-registered basemap (or ENU
+% fallback) and with the same tower-centered season-stable extent as the
+% footprint map. Pure forward model (elevation table + site + tower/snow
+% height); data preparation and day selection live in the testable
+% lib/soop_specular_track.m. The date picker pins the day; cleared = the LAST
+% COMPLETE day in the top date range (the tables start/end mid-day at their
+% UTC endpoints, so partial edge days are skipped unless pinned).
+    S = V;  cfg = V.cfg;
+    show_msg     = @(varargin) V.U.show_msg(V, varargin{:});
+    range_bounds = @(varargin) V.U.range_bounds(V, varargin{:});
+    MARKER_EVERY_MIN = 60;   % hour markers over the full-rate track line
+
+    if isempty(S.dd_map_sat.ItemsData) || isempty(S.dd_map_sat.Value)
+        show_msg(['No muos_elevation_*.csv found in cfg.elev_dir — generate ' ...
+                  'elevation tables with make_muos_elevation.py.']);
+        return;
+    end
+    norad = S.dd_map_sat.Value;
+    [t0, t1] = range_bounds();
+    [series, meta] = soop_specular_track(cfg, V.WX, norad, S.dp_map.Value, ...
+                                         t0, t1, S.dd_map_h.Value);
+    if isempty(series)
+        show_msg(meta.msg);
+        return;
+    end
+    % Elevation-table rows on the drawn day (NOT summed over height variants —
+    % the sidebar reports source rows, per-series valid counts stay in
+    % series.n_valid).
+    S.last_n = meta.n_rows;
+
+    % Same day-independent, tower-centered extent rule as the footprint map
+    % (season worst case; the specular offset is always inside the ellipse
+    % center offset R, so the footprint extent bounds the track too).
+    H = sigma0_math();
+    lambda_m = 299792458 / cfg.freq_hz;
+    [~, a_w, ~, R_w] = H.fresnel(lambda_m, cfg.tower_h_m, meta.el_min_table);
+    extent = 1.5 * (R_w + a_w);                      % m about the tower
+    m_per_deg_lat = 111320;
+    m_per_deg_lon = 111320 * cosd(cfg.site_lat);
+
+    sat_label = sprintf('NORAD %d', norad);
+    li = find(cellfun(@(v) isequal(v, norad), S.dd_map_sat.ItemsData), 1);
+    if ~isempty(li), sat_label = S.dd_map_sat.Items{li}; end
+    ttl = sprintf('Specular track — %s — %s', sat_label, ...
+                  string(meta.day, 'yyyy-MM-dd'));
+    if meta.auto_day
+        ttl = [ttl ' (last complete day in range)'];
+    end
+    if ~meta.complete
+        ttl = sprintf('%s — partial (%s\x2013%s)', ttl, ...
+                      string(meta.cov_start, 'HH:mm'), ...
+                      string(meta.cov_end, 'HH:mm'));
+    end
+    if ~isempty(meta.snow_msg)
+        ttl = [ttl '  [snow h unavailable]'];
+    end
+
+    gax = try_geoaxes(S.panel);
+    if ~isempty(gax)
+        hold(gax, 'on');
+        lh = gobjects(0);  leg = {};
+        for si = 1:numel(series)
+            sty = '-';  if strcmp(series(si).label, 'snow h'), sty = '--'; end
+            lat = cfg.site_lat + series(si).N / m_per_deg_lat;
+            lon = cfg.site_lon + series(si).E / m_per_deg_lon;
+            lh(end+1) = geoplot(gax, lat, lon, sty, ...
+                'Color', [1 1 1 0.75], 'LineWidth', 1.2);           %#ok<AGROW>
+            leg{end+1} = sprintf('specular track, %s', series(si).label); %#ok<AGROW>
+            mi = track_marker_idx(series(si).t, isfinite(lat) & isfinite(lon), ...
+                                  meta.day, MARKER_EVERY_MIN);
+            geoscatter(gax, lat(mi), lon(mi), 42, series(si).hour(mi), ...
+                       'filled', 'MarkerEdgeColor', 'k');
+        end
+        lh(end+1) = geoplot(gax, cfg.site_lat, cfg.site_lon, '^', ...
+            'MarkerSize', 9, 'MarkerFaceColor', [0.9 0.1 0.1], ...
+            'MarkerEdgeColor', 'w', 'LineWidth', 0.75);
+        leg{end+1} = 'tower';
+        geolimits(gax, cfg.site_lat + extent / m_per_deg_lat * [-1 1], ...
+                       cfg.site_lon + extent / m_per_deg_lon * [-1 1]);
+        colormap(gax, parula);
+        clim(gax, [0 24]);
+        cb = colorbar(gax);
+        cb.Label.String = 'hour of day (local)';
+        title(gax, ttl);
+        legend(gax, lh, leg, 'Location', 'northwest', 'TextColor', 'w', ...
+               'Color', [0 0 0 0.35]);
+        hold(gax, 'off');
+    else
+        % Offline / no geoaxes: local East/North meters about the tower.
+        ax = axes(S.panel);
+        ax.Units = 'normalized';
+        ax.Position = [0.08 0.08 0.80 0.84];
+        hold(ax, 'on');
+        lh = gobjects(0);  leg = {};
+        for si = 1:numel(series)
+            sty = '-';  if strcmp(series(si).label, 'snow h'), sty = '--'; end
+            lh(end+1) = plot(ax, series(si).E, series(si).N, sty, ...
+                'Color', [0.45 0.45 0.45], 'LineWidth', 1.2);       %#ok<AGROW>
+            leg{end+1} = sprintf('specular track, %s', series(si).label); %#ok<AGROW>
+            ok = isfinite(series(si).E) & isfinite(series(si).N);
+            mi = track_marker_idx(series(si).t, ok, meta.day, MARKER_EVERY_MIN);
+            scatter(ax, series(si).E(mi), series(si).N(mi), 42, ...
+                    series(si).hour(mi), 'filled', 'MarkerEdgeColor', 'k');
+        end
+        lh(end+1) = plot(ax, 0, 0, '^', 'MarkerSize', 9, ...
+            'MarkerFaceColor', [0.9 0.1 0.1], 'MarkerEdgeColor', 'k');
+        leg{end+1} = 'tower';
+        axis(ax, 'equal');
+        xlim(ax, extent * [-1 1]);  ylim(ax, extent * [-1 1]);
+        xlabel(ax, 'East (m)');  ylabel(ax, 'North (m)');
+        grid(ax, 'on');
+        colormap(ax, parula);
+        clim(ax, [0 24]);
+        cb = colorbar(ax);
+        cb.Label.String = 'hour of day (local)';
+        title(ax, [ttl '  (no basemap — geoaxes unavailable)']);
+        legend(ax, lh, leg, 'Location', 'northwest');
+        hold(ax, 'off');
+    end
+end
+
+
+function idx = track_marker_idx(t, ok, day0, step_min)
+% Indices of the valid epochs nearest each step_min boundary of the day (plus
+% the first/last valid epochs), for time-decimated markers over the full-rate
+% line. Time-based on purpose: table cadence is configurable, and gaps must
+% not shift the marker spacing.
+    idx = [];
+    iv = find(ok);
+    if isempty(iv), return; end
+    targets = day0 + minutes(0:step_min:24 * 60);
+    for k = 1:numel(targets)
+        [dt_min, j] = min(abs(t(iv) - targets(k)));
+        if dt_min <= minutes(step_min) / 2
+            idx(end+1) = iv(j);                                     %#ok<AGROW>
+        end
+    end
+    idx = unique([idx, iv(1), iv(end)]);
 end

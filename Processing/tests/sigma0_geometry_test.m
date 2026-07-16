@@ -15,7 +15,7 @@ function tests = sigma0_geometry_test
 % finite-window estimator residual, not by sampling noise.
 %
 % Run (from Processing/):
-%   matlab -batch "soop_setup_paths; runtests('tests/sigma0_geometry_test')"
+%   matlab -batch "soop_setup_paths; addpath('tests'); runtests('sigma0_geometry_test')"
 
     tests = functiontests(localfunctions);
 end
@@ -50,6 +50,38 @@ function test_fresnel_zone_axes_and_area(tc)
     [~, a30, b30, R30] = H.fresnel(lambda, h, 30);
     verifyEqual(tc, a30, b30 / sind(30), 'RelTol', 1e-12);
     verifyEqual(tc, R30, h / tand(30) + (d / sind(30)) / tand(30), 'RelTol', 1e-12);
+end
+
+function test_spec_offset_closed_forms(tc)
+% Specular-point offset x = h/tan(e): e = 45 -> h, e = 90 -> 0 (tand(90) =
+% Inf exactly), e = 30 -> h*sqrt(3). Vectorized over elevation columns and
+% broadcasts a scalar height.
+    H = sigma0_math();
+    h = 6.096;
+    verifyEqual(tc, H.spec_offset(h, 45), h,           'RelTol', 1e-12);
+    verifyEqual(tc, H.spec_offset(h, 90), 0,           'AbsTol', 1e-12);
+    verifyEqual(tc, H.spec_offset(h, 30), h * sqrt(3), 'RelTol', 1e-12);
+
+    % Column-vector elevation with scalar h, and per-epoch h columns.
+    e_col = [30; 45; 90];
+    verifyEqual(tc, H.spec_offset(h, e_col), h ./ tand(e_col), 'AbsTol', 1e-12);
+    h_col = [6.096; 5.5; 4.2];
+    verifyEqual(tc, H.spec_offset(h_col, e_col), h_col ./ tand(e_col), ...
+                'AbsTol', 1e-12);
+end
+
+function test_spec_offset_inside_ellipse_center(tc)
+% The specular point sits STRICTLY inside the Fresnel-ellipse center offset R
+% (they differ by (d/sin e)/tan(e) > 0) away from zenith; both are exactly 0
+% at e = 90.
+    H = sigma0_math();
+    lambda = 0.8102;  h = 6.096;
+    for e = [5, 15, 30, 38, 60, 85]
+        [~, ~, ~, R] = H.fresnel(lambda, h, e);
+        verifyLessThan(tc, H.spec_offset(h, e), R);
+    end
+    [~, ~, ~, R90] = H.fresnel(lambda, h, 90);
+    verifyEqual(tc, H.spec_offset(h, 90), R90, 'AbsTol', 1e-12);
 end
 
 
