@@ -115,6 +115,8 @@ classdef SoopViewerState < handle
         snr_row
         sw_ampscale
         ampscale_row
+        sw_phaseoff
+        phaseoff_row
         sw_detrend
         detrend_row
         cb_tod

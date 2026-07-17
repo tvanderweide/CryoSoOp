@@ -165,6 +165,17 @@ function soop_viewer_render_raw(V, kind)
                 end
                 D.I0 = real(ch0(idx));  D.Q0 = imag(ch0(idx));
                 D.I1 = real(ch1(idx));  D.Q1 = imag(ch1(idx));
+            case 'Raw: Phase Offset'
+                % Contiguous un-decimated slice about the midpoint of the
+                % loaded ~1.8 s analysis window; phi/rho are measured over
+                % the whole loaded window (compute_calib reads the entire
+                % file, so its C_RDNS phase can differ slightly). Both
+                % switch states are precomputed in D so the cached data
+                % stays valid when the Phase cal switch toggles (the cache
+                % key deliberately excludes the switch).
+                SLICE_HALF = 1000;   % display samples each side of midpoint
+                D = V.U.phoff_prep(ch0, ch1, cfg.fs, SLICE_HALF);
+                D.xlim_us = 5;       % initial zoom half-width (us)
         end
         S.cache = struct('key', key, 'data', D);
     end
@@ -316,6 +327,49 @@ function soop_viewer_render_raw(V, kind)
             if D.ymax > 0
                 yl = [-D.ymax, D.ymax] * 1.05;
                 ylim(ax1, yl);  ylim(ax2, yl);
+            end
+        case 'Raw: Phase Offset'
+            if D.n == 0
+                show_msg('No samples in this capture.');
+                return;
+            end
+            % The correction rotates CH1 by the measured offset so the
+            % correlated components align (the lag-0 cross-correlation
+            % phase goes to 0); sample-exact overlap is not expected since
+            % each channel keeps its own receiver noise and gain. With no
+            % usable correlation (phi NaN) the switch is a no-op.
+            corr_on = strcmp(S.sw_phaseoff.Value, 'On') && isfinite(D.phi);
+            if corr_on
+                r1 = D.r1_on;   leg1 = 'CH1 (reflected, corrected)';
+            else
+                r1 = D.r1_off;  leg1 = 'CH1 (reflected)';
+            end
+            tl = tiledlayout(S.panel, 1, 1);
+            ax = nexttile(tl);
+            plot(ax, D.t_us, D.r0, D.t_us, r1);
+            legend(ax, {'CH0 (direct)', leg1}, 'Location', 'best');
+            xlabel(ax, ['Time from window midpoint (' char(181) 's)']);
+            ylabel(ax, 'Amplitude');
+            dash = char(8212);
+            if isfinite(D.phi)
+                onoff = 'OFF';
+                if corr_on, onoff = 'ON'; end
+                tstr = sprintf('%s %s phase offset %.1f%s (rho %.2f) %s correction %s', ...
+                               base, dash, rad2deg(D.phi), char(176), D.rho, dash, onoff);
+            else
+                tstr = sprintf('%s %s phase offset n/a (no usable correlation)', ...
+                               base, dash);
+            end
+            title(ax, tstr, 'Interpreter', 'none');
+            grid(ax, 'on');
+            % Open zoomed to the window midpoint so the inter-channel offset
+            % is visible; zoom out interactively for the full plotted slice.
+            xw = min(D.xlim_us, max(abs(D.t_us)));
+            if xw > 0, xlim(ax, [-xw, xw]); end
+            % Symmetric limits from the union of the Off/On traces so the
+            % scale does not jump when the switch toggles.
+            if isfinite(D.ymax) && D.ymax > 0
+                ylim(ax, [-D.ymax, D.ymax] * 1.05);
             end
     end
 end

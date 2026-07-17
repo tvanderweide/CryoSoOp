@@ -2,7 +2,7 @@ function U = soop_viewer_util()
 % UI/label/formatting helpers for BrundageSoOp_viewer. Returns a struct of
 % handles (same idiom as rfi_excise/BrundageSoOp_fun); each takes V first
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
-% parse_tod/tod_daily_idx/src_desc/open_fun).
+% parse_tod/tod_daily_idx/phoff_measure/phoff_prep/src_desc/open_fun).
     U.range_bounds = @range_bounds;
     U.apply_overrides = @apply_overrides;
     U.style_legend = @style_legend;
@@ -30,6 +30,8 @@ function U = soop_viewer_util()
     U.tcol = @tcol;
     U.parse_tod = @parse_tod;
     U.tod_daily_idx = @tod_daily_idx;
+    U.phoff_measure = @phoff_measure;
+    U.phoff_prep = @phoff_prep;
     U.src_desc = @src_desc;
     U.open_fun = @open_fun;
 end
@@ -689,4 +691,69 @@ function [idx, tday] = tod_daily_idx(t, target, win)
     [idx, ord] = sort(srt.orig(sel));
     tday  = srt.d_near(sel);
     tday  = tday(ord);
+end
+
+
+function [phi, rho] = phoff_measure(ch0, ch1)
+% Inter-channel phase offset at lag 0 in the pipeline's D.*conj(R) order
+% (schema v5+, same expression as compute_calib's C_RDNS): phi =
+% angle(mean(ch0 .* conj(ch1))) over the finite sample pairs, in radians.
+% rho is the normalized lag-0 coherence |C| / sqrt(<|D|^2><|R|^2>) in
+% [0,1]. Fail-closed: phi = rho = NaN when there are no finite pairs, a
+% channel has zero power, or the correlation is zero/non-finite — a zero
+% cross-correlation has undefined phase and must not read as a valid 0.
+    phi = NaN;
+    rho = NaN;
+    ch0 = ch0(:);
+    ch1 = ch1(:);
+    n   = min(numel(ch0), numel(ch1));
+    ch0 = ch0(1:n);
+    ch1 = ch1(1:n);
+    ok  = isfinite(ch0) & isfinite(ch1);
+    if ~any(ok), return; end
+    C  = mean(ch0(ok) .* conj(ch1(ok)));
+    p0 = mean(abs(ch0(ok)).^2);
+    p1 = mean(abs(ch1(ok)).^2);
+    if ~isfinite(C) || C == 0 || p0 == 0 || p1 == 0, return; end
+    phi = angle(C);
+    rho = abs(C) / sqrt(p0 * p1);
+end
+
+
+function D = phoff_prep(ch0, ch1, fs, slice_half)
+% Display data for 'Raw: Phase Offset': phi/rho measured over the whole
+% loaded window (phoff_measure), plus a contiguous un-decimated slice of
+% both channels' REAL component about the window midpoint (center sample
+% c = floor((N+1)/2), slice clamped to the record). Both switch states are
+% precomputed — r1_off (as recorded) and r1_on (rotated by exp(1i*phi) so
+% the correlated components align) — so the render cache stays valid when
+% the Phase cal switch toggles; ymax is their union, keeping the y-scale
+% stable across toggles. When phi is NaN (no usable correlation) r1_on
+% falls back to r1_off so a rotation can never inject NaNs.
+    ch0 = ch0(:);
+    ch1 = ch1(:);
+    n   = min(numel(ch0), numel(ch1));
+    ch0 = ch0(1:n);
+    ch1 = ch1(1:n);
+    [D.phi, D.rho] = phoff_measure(ch0, ch1);
+    D.n = n;
+    if n == 0
+        D.t_us   = zeros(0, 1);
+        D.r0     = zeros(0, 1);
+        D.r1_off = zeros(0, 1);
+        D.r1_on  = zeros(0, 1);
+        D.ymax   = 0;
+        return;
+    end
+    c   = floor((n + 1) / 2);
+    idx = (max(1, c - slice_half) : min(n, c + slice_half))';
+    D.t_us   = (idx - c) / fs * 1e6;
+    D.r0     = real(ch0(idx));
+    D.r1_off = real(ch1(idx));
+    if isfinite(D.phi)
+        D.r1_on = real(ch1(idx) .* exp(1i * D.phi));
+    else
+        D.r1_on = D.r1_off;
+    end
+    D.ymax = max(abs([D.r0; D.r1_off; D.r1_on]));
 end

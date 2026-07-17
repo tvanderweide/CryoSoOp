@@ -298,6 +298,21 @@ function render_now(V)
     set([S.dd_ctype, S.dd_cap, S.btn_prev, S.btn_next], ...
         'Enable', matlab.lang.OnOffSwitchState(info.uses_cap));
 
+    % 'Raw: Phase Offset' reads NL (phase-cal) captures only: pin the
+    % capture-type selector to NL (rebuilding the list once on entry, which
+    % picks the NL capture nearest in time to the previous selection) and
+    % grey it while the view is active — dd_ctype is enabled iff
+    % info.uses_cap && ~is_phoff. dd_cap/prev/next stay live. Safe here:
+    % rebuild_caplist only repopulates the dropdown, it never re-renders.
+    is_phoff = strcmp(kind, 'Raw: Phase Offset');
+    if is_phoff
+        if ~strcmp(S.dd_ctype.Value, 'NL')
+            S.dd_ctype.Value = 'NL';
+            V.CB.rebuild_caplist(V, true);
+        end
+        S.dd_ctype.Enable = 'off';
+    end
+
     % Dataset (RFI method) selector affects product-CSV plots (it switches
     % cfg.out_dir) AND the live-filtered raw views (PSD, Spectrogram), where
     % the selected method is applied to the displayed capture per
@@ -327,6 +342,9 @@ function render_now(V)
     % amplitude view.
     is_ampscale = strcmp(kind, 'Calib: Cross-correlation amplitudes (C_RDL, C_RDNS)');
     S.ampscale_row.Visible = matlab.lang.OnOffSwitchState(is_ampscale);
+
+    % Phase cal switch applies only to the Raw: Phase Offset view.
+    S.phaseoff_row.Visible = matlab.lang.OnOffSwitchState(is_phoff);
 
     % Detrend checkbox applies to the L1 and L2 diurnal phase plots.
     is_diurnal = strcmp(kind, 'L1: Diurnal phase pattern') || ...

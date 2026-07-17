@@ -122,10 +122,10 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [22 1]);
-    % Rows 13/14 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [23 1]);
+    % Rows 14/15 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -235,6 +235,19 @@ function soop_viewer_layout(V)
                              'Value', 'Log', 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.ampscale_row = ampscale_row;
     S.ampscale_row.Visible = 'off';
+
+    % Phase cal switch — shown only for 'Raw: Phase Offset'. On rotates the
+    % reflected channel by the capture's measured inter-channel offset
+    % (angle(mean(D .* conj(R))) over the loaded analysis window) so the
+    % correlated components align; Off shows the channels as recorded.
+    phaseoff_row = uigridlayout(info_gl, [1 2]);
+    phaseoff_row.ColumnWidth = {60, 'fit'};
+    phaseoff_row.Padding = [0 0 0 0];
+    uilabel(phaseoff_row, 'Text', 'Phase cal', 'FontWeight', 'bold');
+    S.sw_phaseoff = uiswitch(phaseoff_row, 'slider', 'Items', {'Off', 'On'}, ...
+                             'Value', 'Off', 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.phaseoff_row = phaseoff_row;
+    S.phaseoff_row.Visible = 'off';
 
     % Detrend toggle — shown only for 'L1: Diurnal phase pattern'. When on, each
     % capture's phase has its day's circular mean removed before hour binning, so
