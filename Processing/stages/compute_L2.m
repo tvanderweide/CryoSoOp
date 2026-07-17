@@ -33,10 +33,10 @@ function compute_L2(cfg)
 % within chain_join_tol_min; "unknown" provenance and keyed captures with no
 % same-session calib get NaN (never a neighbor's phase). chain_session
 % records the association per row. phase_corr_cal_deg (+_fd/_fd_muos)
-% = wrap180(phase_corr* - (phase_chain_deg - cfg.chain_phase_ref_deg)), and
-% since 2026-07-17 cfg.chain_phase_ref_deg = 0: FULL per-session subtraction
-% (gr-doa-style common-reference zeroing at the injection plane, no season-
-% derived constant; the retired -81.4 season-mean anchor's history:
+% = wrap180(phase_corr* - phase_chain_deg): FULL per-session subtraction,
+% gr-doa-style common-reference zeroing at the injection plane, with no
+% reference constant (chain_phase_ref_deg retired 2026-07-17 — ignored if a
+% caller still sets it; the -81.4/0 anchor history:
 % docs/config-reference.md#chain-cal-knobs). The chain phase is treated as
 % FREQUENCY-FLAT across the sinc/fd/fd_muos domains (accepted 2026-07-17 —
 % see the note at the application site below).
@@ -97,16 +97,19 @@ function compute_L2(cfg)
 
     % --- Chain-cal inputs, computed up front: the dependency gate below must
     %     see the run table BEFORE the incremental existing-base filter. ---
-    % Chain-cal knobs, all overridable from cfg (docs/config-reference.md#chain-cal-knobs):
-    chain_gap_min = getfield_default(cfg, 'chain_run_gap_min',   20);
-    chain_tol_min = getfield_default(cfg, 'chain_join_tol_min',  60);
-    chain_ref_deg = getfield_default(cfg, 'chain_phase_ref_deg', 0);
+    % Chain-cal knobs, both overridable from cfg (docs/config-reference.md#chain-cal-knobs).
+    % There is NO reference knob: the per-session chain phase is subtracted in
+    % full (chain_phase_ref_deg retired 2026-07-17; the field is ignored if a
+    % caller still sets it).
+    chain_gap_min = getfield_default(cfg, 'chain_run_gap_min',  20);
+    chain_tol_min = getfield_default(cfg, 'chain_join_tol_min', 60);
     R = chain_phase_runs(fullfile(cfg.out_dir, 'BrundageSoOp_calib.csv'), chain_gap_min);
     stamp_path = fullfile(cfg.out_dir, 'BrundageSoOp_L2_chaincal_stamp.json');
-    stamp_now  = struct('algo_version', 1, ...
-                        'chain_phase_ref_deg', chain_ref_deg, ...
-                        'chain_run_gap_min',   chain_gap_min, ...
-                        'chain_join_tol_min',  chain_tol_min, ...
+    % algo_version 2 (2026-07-17): the no-reference stamp schema — v1 stamps
+    % (which carried chain_phase_ref_deg) mismatch and rebuild once.
+    stamp_now  = struct('algo_version', 2, ...
+                        'chain_run_gap_min',  chain_gap_min, ...
+                        'chain_join_tol_min', chain_tol_min, ...
                         'runs', runs_struct(R));
 
     % --- Chain-phase join, computed for EVERY capture up front ---
@@ -114,7 +117,7 @@ function compute_L2(cfg)
     % the stored rows, so a change in what any existing row WOULD get —
     % newly usable calibration, a repaired session_id, a shifted run mean —
     % forces a rebuild instead of leaving stale values behind.
-    [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, cfg.out_dir, chain_ref_deg);
+    [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, cfg.out_dir);
 
     % Incremental + schema upkeep (see header) — skip captures already in the
     % L2 CSV only when (a) the CSV is current-schema, (b) the chain-cal
@@ -216,11 +219,10 @@ function compute_L2(cfg)
     % here they are simply applied.
     % SIGN: compute_L1 and compute_calib share the D.*conj(R) convention
     % (unified 2026-07-06), so subtracting the calib chain phase removes the
-    % receiver-chain differential from the signal phase directly. Since
-    % 2026-07-17 chain_phase_ref_deg is 0: FULL per-session subtraction — the
-    % corrected phase is zeroed at the calibration injection reference plane
-    % using only the capture's own session, no season-derived constant (the
-    % retired 2025-26 season-mean anchor was -81.4; history in
+    % receiver-chain differential from the signal phase directly, IN FULL —
+    % the corrected phase is zeroed at the calibration injection reference
+    % plane using only the capture's own session. There is no reference
+    % constant (chain_phase_ref_deg retired 2026-07-17; history in
     % docs/config-reference.md#chain-cal-knobs).
     % FREQUENCY-FLAT ASSUMPTION (accepted 2026-07-17): one full-band, lag-zero
     % chain phase is applied to all three phase domains (sinc / fd / fd_muos).
@@ -228,10 +230,9 @@ function compute_L2(cfg)
     % group delay or band-dependent chain response is ever suspected; known
     % caveat — the notch method's state-specific NL/L RFI operators degrade the
     % baseline cancellation (~0.5 vs ~0.1 deg season scatter), accepted.
-    d_chain          = phase_chain - chain_ref_deg;
-    corr_cal         = wrap180(phase_corr         - d_chain);
-    corr_cal_fd      = wrap180(phase_corr_fd      - d_chain);
-    corr_cal_fd_muos = wrap180(phase_corr_fd_muos - d_chain);
+    corr_cal         = wrap180(phase_corr         - phase_chain);
+    corr_cal_fd      = wrap180(phase_corr_fd      - phase_chain);
+    corr_cal_fd_muos = wrap180(phase_corr_fd_muos - phase_chain);
 
     out = table(T.timestamp, T.base_name, theta, az, T.peak_phase_deg, ...
                 wrap180(phase_geom), phase_corr, T.snr_db, ...
@@ -414,7 +415,7 @@ function runs = runs_struct(R)
 end
 
 
-function [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, out_dir, chain_ref_deg)
+function [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, out_dir)
 % Session-keyed chain-phase join over the FULL capture table (2026-07-17).
 % Signal rows with a run-folder session key join their own UHD session's
 % calib run by exact identity — same session is definitionally correct, so
@@ -462,20 +463,23 @@ function [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, out_dir,
     else
         fprintf(['[L2] Chain-phase cal: %d keyed + %d legacy capture(s) matched ' ...
                  'across %d calib runs; %d keyed unmatched, %d unknown provenance ' ...
-                 '(NaN). ref %.1f deg.\n'], sum(tf), ...
+                 '(NaN). Full per-session subtraction.\n'], sum(tf), ...
                 sum(~isnan(phase_chain)) - sum(tf), height(R), ...
-                sum(is_keyed_sig & ~tf), sum(sig_sid == "unknown"), chain_ref_deg);
+                sum(is_keyed_sig & ~tf), sum(sig_sid == "unknown"));
     end
 end
 
 
 function ok = chain_stamp_config_matches(stamp_path, stamp_now)
 % True only if the stored dependency stamp exists, parses, and agrees on the
-% algorithm version + chain config. Calibration-content and provenance
-% changes are caught separately by chain_assoc_matches, which compares every
-% existing row's freshly recomputed association directly (a run-table proxy
-% comparison proved unsafe: it could not see newly USABLE calibration —
-% empty-runs stamps or added runs satisfying previously unmatched rows).
+% algorithm version + chain config. algo_version 2 is the no-reference stamp
+% schema (2026-07-17): v1 stamps carried chain_phase_ref_deg and mismatch
+% here, forcing the correct one-time rebuild. Calibration-content and
+% provenance changes are caught separately by chain_assoc_matches, which
+% compares every existing row's freshly recomputed association directly (a
+% run-table proxy comparison proved unsafe: it could not see newly USABLE
+% calibration — empty-runs stamps or added runs satisfying previously
+% unmatched rows).
     ok = false;
     if ~isfile(stamp_path), return; end
     try
@@ -483,11 +487,10 @@ function ok = chain_stamp_config_matches(stamp_path, stamp_now)
     catch
         return;
     end
-    for f = {'algo_version', 'chain_phase_ref_deg', 'chain_run_gap_min', 'chain_join_tol_min'}
+    for f = {'algo_version', 'chain_run_gap_min', 'chain_join_tol_min'}
         if ~isfield(old, f{1}) || ~isnumeric(old.(f{1})) || ~isscalar(old.(f{1})), return; end
     end
     if old.algo_version ~= stamp_now.algo_version, return; end
-    if abs(old.chain_phase_ref_deg - stamp_now.chain_phase_ref_deg) > 1e-6, return; end
     if old.chain_run_gap_min  ~= stamp_now.chain_run_gap_min,  return; end
     if old.chain_join_tol_min ~= stamp_now.chain_join_tol_min, return; end
     ok = true;

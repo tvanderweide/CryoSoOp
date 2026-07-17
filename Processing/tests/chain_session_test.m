@@ -154,7 +154,7 @@ function test_l2_keyed_join_two_close_sessions(tc)
     sig = sig_rows([t0 + minutes(2); t0 + minutes(12)], ...
                    ["20260102/100000"; "20260102/101000"]);
     cfg = l2_fixture(d, sig, cal, t0);
-    % cfg.chain_phase_ref_deg deliberately UNSET: fallback must be 0.
+    % No reference knob exists (retired 2026-07-17): always full subtraction.
     evalc('compute_L2(cfg);');
 
     L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
@@ -276,31 +276,36 @@ function test_l2_stamp_lifecycle(tc)
     verifyEqual(tc, height(L2), 2);
     verifyEmpty(tc, dir(fullfile(d, 'BrundageSoOp_L2_*stale*.csv')));
 
-    % (b) Reference change: full rebuild (archive appears), sigma0 archived.
+    % (b) Gap-min knob change: full rebuild (archive appears), sigma0
+    % archived, deltas stay full subtraction in all three phase domains.
     fake_sigma0 = fullfile(d, 'BrundageSoOp_sigma0.csv');
     writetable(table(1, 'VariableNames', {'x'}), fake_sigma0);
-    cfg_ref = cfg;  cfg_ref.chain_phase_ref_deg = 5;
-    evalc('compute_L2(cfg_ref);');
+    cfg_gap = cfg;  cfg_gap.chain_run_gap_min = 10;
+    evalc('compute_L2(cfg_gap);');
     verifyNotEmpty(tc, dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv')));
     verifyFalse(tc, isfile(fake_sigma0));
     verifyNotEmpty(tc, dir(fullfile(d, 'BrundageSoOp_sigma0_stale_*.csv')));
     L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
     verifyEqual(tc, height(L2), 2);                    % full reprocess
-    dlt = wrap180_local(L2.phase_corr_cal_deg - L2.phase_corr_deg);
-    verifyEqual(tc, dlt, -(L2.phase_chain_deg - 5), 'AbsTol', 1e-9);
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        dlt = wrap180_local(L2.(c{1}) - L2.(c{2}));
+        verifyEqual(tc, dlt, -L2.phase_chain_deg, 'AbsTol', 1e-9);
+    end
 
     % (c) Late calib append to the SAME session (mean 35 -> 30): rebuild with
     % the new mean everywhere, not just on new rows.
     cal3 = cal_rows([t0; t0 + minutes(2); t0 + minutes(4)], [30; 40; 20], ...
                     repmat("20260102/100000", 3, 1));
     write_csv_ts(fullfile(d, 'BrundageSoOp_calib.csv'), cal3);
-    evalc('compute_L2(cfg_ref);');
+    evalc('compute_L2(cfg_gap);');
     L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
     verifyEqual(tc, height(L2), 2);
     verifyEqual(tc, L2.phase_chain_deg, [30; 30], 'AbsTol', 1e-9);
 
     % (d) A join-tolerance knob change alone invalidates via the config stamp.
-    cfg_tol = cfg_ref;  cfg_tol.chain_join_tol_min = 45;
+    cfg_tol = cfg_gap;  cfg_tol.chain_join_tol_min = 45;
     evalc('compute_L2(cfg_tol);');
     % Same-day rebuilds (b), (c), (d) must each keep a DISTINCT archive —
     % no overwritten/blocked recovery copies.
@@ -401,6 +406,59 @@ function test_l2_schema_upgrade_rebuild(tc)
     L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
     verifyEqual(tc, height(L2), 1);
     verifyTrue(tc, ismember('chain_session', L2.Properties.VariableNames));
+end
+
+
+function test_l2_stamp_v1_to_v2_migration(tc)
+% v1 stamps carried chain_phase_ref_deg (retired 2026-07-17). Any v1 stamp —
+% regardless of its stored reference value — must mismatch the v2 config
+% check and force exactly one full rebuild; afterwards the rewritten stamp
+% is v2 with no reference field, and appends resume normally.
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    cal = cal_rows(t0, 30, "20260102/100000");
+    sig = sig_rows(t0 + minutes(1), "20260102/100000");
+    cfg = l2_fixture(d, sig, cal, t0);
+    evalc('compute_L2(cfg);');
+
+    % Overwrite the stamp with a v1-style one (matching knobs + runs, plus
+    % the retired reference field).
+    sp  = fullfile(d, 'BrundageSoOp_L2_chaincal_stamp.json');
+    st  = jsondecode(fileread(sp));
+    v1  = struct('algo_version', 1, 'chain_phase_ref_deg', 5, ...   % nonzero:
+                 'chain_run_gap_min', st.chain_run_gap_min, ...     % the risky
+                 'chain_join_tol_min', st.chain_join_tol_min, ...   % legacy case
+                 'runs', st.runs);
+    fid = fopen(sp, 'w');  fwrite(fid, jsonencode(v1));  fclose(fid);
+
+    evalc('compute_L2(cfg);');
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv'))), 1);
+    L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
+    verifyEqual(tc, height(L2), 1);
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        dlt = wrap180_local(L2.(c{1}) - L2.(c{2}));
+        verifyEqual(tc, dlt, -L2.phase_chain_deg, 'AbsTol', 1e-9);
+    end
+    st2 = jsondecode(fileread(sp));
+    verifyEqual(tc, st2.algo_version, 2);
+    verifyFalse(tc, isfield(st2, 'chain_phase_ref_deg'));
+
+    % Appends resume under the rewritten v2 stamp: one new capture, no new
+    % archive, full subtraction on every row.
+    sig2 = [sig; sig_rows(t0 + minutes(3), "20260102/100000")];
+    write_csv_ts(fullfile(d, 'BrundageSoOp_L1_sig.csv'), sig2);
+    evalc('compute_L2(cfg);');
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv'))), 1);
+    L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
+    verifyEqual(tc, height(L2), 2);
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        dlt = wrap180_local(L2.(c{1}) - L2.(c{2}));
+        verifyEqual(tc, dlt, -L2.phase_chain_deg, 'AbsTol', 1e-9);
+    end
 end
 
 

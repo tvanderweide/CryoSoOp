@@ -228,19 +228,15 @@ Hidden fallbacks, i.e. values used only if the corresponding `cfg` field is
 absent/empty. All confirmed directly from `getfield_default`/`getdef` calls
 in the stage source (not inferred).
 
-**compute_L2** (`getfield_default`) — only `chain_run_gap_min` and
-`chain_join_tol_min` are actually left to these fallbacks in production;
-`chain_phase_ref_deg` IS set explicitly by `BrundageSoOp.m`
-(`cfg.chain_phase_ref_deg = 0;`), matching the code fallback
-(`getfield_default(cfg, 'chain_phase_ref_deg', 0)` in `compute_L2.m`) —
-both changed from `-81.4` to `0` on 2026-07-17, see
-[Chain-cal knobs](#chain-cal-knobs):
+**compute_L2** (`getfield_default`) — the two chain-cal knobs are left to
+these fallbacks in production (the entry script sets neither; the former
+third knob, `chain_phase_ref_deg`, was retired 2026-07-17 — see
+[Chain-cal knobs](#chain-cal-knobs)):
 
 | Field | Fallback | Notes |
 |---|---|---|
 | `chain_run_gap_min` | `20` | not set by the entry script; legacy-flat gap grouping only — see [Chain-cal knobs](#chain-cal-knobs) |
 | `chain_join_tol_min` | `60` | not set by the entry script; hard limit for legacy-flat joins, diagnostic-only for session-keyed joins — see [Chain-cal knobs](#chain-cal-knobs) |
-| `chain_phase_ref_deg` | `0` | **set explicitly by the entry script** (also `0`, matching the fallback; both were `-81.4` before 2026-07-17) — see [Chain-cal knobs](#chain-cal-knobs) |
 
 **compute_rfi_spectrum** (`getdef`) — the "hidden" set below is never set by
 the entry script at all (no corresponding `cfg.*` assignment exists in
@@ -295,7 +291,7 @@ went through `BrundageSoOp.m`).
 
 ## Chain-cal knobs
 
-The three knobs, all overridable from cfg:
+The two knobs, both overridable from cfg:
 
 - `chain_run_gap_min` — legacy-flat calib rows further apart than this start
   a new gap run (20). Session-keyed rows ignore it: one cryosoop run folder
@@ -304,29 +300,33 @@ The three knobs, all overridable from cfg:
   legacy-flat nearest-run join (60). Session-keyed joins are exact identity
   joins with **no time limit**; the tolerance only fires a diagnostic
   (`WARNING(chaincal-key)`) if a same-session match is suspiciously far away.
-- `chain_phase_ref_deg` — FIXED reference subtracted together with the
-  per-session chain phase: `phase_corr_cal = wrap180(phase_corr −
-  (phase_chain − ref))`.
 
-**Reference = 0 (decision 2026-07-17, full per-session subtraction)**: both
-the entry script and the code fallback are now `0`, so each capture is
-corrected by its own UHD session's measured inter-channel chain phase alone —
+**Full per-session subtraction — no reference knob (2026-07-17)**: the
+correction is unconditionally
+`phase_corr_cal = wrap180(phase_corr − phase_chain)` — each capture is
+corrected by its own UHD session's measured inter-channel chain phase alone,
 no season-derived constant, nothing to re-derive after a UHD/firmware/
-hardware step (the per-session measurement absorbs the step by construction).
-This zeroes the calibrated phase at the calibration injection reference
-plane, the same full-offset behavior as the Ettus gr-doa direction-finding
-correction. Calibrated phase columns therefore sit ~`−phase_chain` (~+81 deg)
-offset from the uncorrected columns; circular differences, trends, and
-sigma0 magnitudes are unaffected by the constant.
+hardware step (the per-session measurement absorbs the step by
+construction). This zeroes the calibrated phase at the calibration injection
+reference plane, the same full-offset behavior as the Ettus gr-doa
+direction-finding correction. Calibrated phase columns therefore sit
+~`−phase_chain` (~+81 deg) offset from the uncorrected columns; circular
+differences, trends, and sigma0 magnitudes are unaffected by the constant.
 
-History: from 2026-07-04 to 2026-07-17 the reference was the 2025-26
-season circular mean of the notch chain series (`+81.4`, then `−81.4` after
-the 2026-07-06 v5 conjugation unification below), which made the *applied*
-correction ~zero-mean — a monitoring/insurance framing. That season-specific
-anchor was retired with the switch to full per-session subtraction; changing
-the reference now invalidates the chain-cal dependency stamp and triggers a
-one-time full L2 rebuild (see below), so mixed-reference product files
-cannot occur.
+**Retired reference knob (`chain_phase_ref_deg`) — history**: from
+2026-07-04 to 2026-07-17 a FIXED reference was subtracted alongside the
+chain phase (`phase_corr_cal = wrap180(phase_corr − (phase_chain − ref))`),
+anchored to the 2025-26 season circular mean of the notch chain series
+(`+81.4`, then `−81.4` after the 2026-07-06 v5 conjugation unification
+below) so the *applied* correction was ~zero-mean — a monitoring/insurance
+framing. On 2026-07-17 the reference moved to `0` (full subtraction) and the
+knob was then removed entirely: a knob that must forever stay `0` invites a
+silent phase-level convention change. Setting `cfg.chain_phase_ref_deg`
+today is ignored. Reproducing the legacy anchored phase level is possible
+only from git history / archived CSVs (accepted — the season products are
+being reprocessed and the legacy anchored outputs dropped). The removal
+bumped the dependency-stamp `algo_version` to 2, so any product built under
+a v1 stamp rebuilds once.
 
 **Session-keyed join + dependency stamp (2026-07-17)**: calib and L1 CSVs
 carry a `session_id` sentinel (schema v6; `lib/session_key.m`): the
@@ -335,14 +335,14 @@ session), `legacy-flat` (data-root capture, time-gap grouping), or `unknown`
 (fails closed: no chain cal). compute_L2 records the association per row in
 `chain_session` and gates incremental appends on two checks made before the
 existing-row filter: the config/algorithm stamp
-(`BrundageSoOp_L2_chaincal_stamp.json`: algorithm version + the three knobs;
+(`BrundageSoOp_L2_chaincal_stamp.json`: algorithm version + the two knobs;
 the run table is stored for provenance) must match, and every existing row's
 freshly recomputed chain association (phase + session) must equal what it
-has stored. Any difference — reference or knob change, algorithm change,
-late-added pairs shifting a session mean, repaired overflow flags or
-session_id values, newly usable calibration (e.g. after the v6 migration),
-a regenerated calib CSV — archives and rebuilds the whole L2 CSV (cheap)
-and renames any sigma0 product aside (`_stale_*`).
+has stored. Any difference — knob change, algorithm change, late-added pairs
+shifting a session mean, repaired overflow flags or session_id values, newly
+usable calibration (e.g. after the v6 migration), a regenerated calib CSV —
+archives and rebuilds the whole L2 CSV (cheap) and renames any sigma0
+product aside (`_stale_*`).
 
 **Frequency-flat assumption (accepted 2026-07-17)**: one full-band, lag-zero
 chain phase is applied to all three phase domains (sinc / fd / fd_muos).
