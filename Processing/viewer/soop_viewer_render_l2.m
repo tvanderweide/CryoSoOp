@@ -98,10 +98,38 @@ function soop_viewer_render_l2(V, kind)
             return;
         end
         [t0, t1] = range_bounds();
-        TC = S.CAND(tcol(S.CAND) >= t0 & tcol(S.CAND) < t1, :);
-        if isempty(TC)
-            show_msg('No candidate rows in the selected date range.');
-            return;
+        % Optional daily time-of-day filter: one capture per target day (the
+        % capture nearest that day's target instant), dropping days whose
+        % nearest capture is farther than TOD_WINDOW away. The date range
+        % selects target days, so the candidate subset gets ±TOD_WINDOW
+        % slack — a capture just outside the picked range may serve a
+        % target day inside it. Selection is row-based (same rows for all
+        % three candidate figures); a kept row whose phase value is NaN
+        % still counts in n but draws no point.
+        tod_note = '';
+        if S.cb_tod.Value
+            TOD_WINDOW = hours(1);
+            [tgt, okt] = V.U.parse_tod(S.ef_tod.Value);
+            if ~okt
+                show_msg('Enter time as H, HHMM, or HH:MM (e.g. 0600).');
+                return;
+            end
+            TCw = S.CAND(tcol(S.CAND) >= t0 - TOD_WINDOW & ...
+                         tcol(S.CAND) <  t1 + TOD_WINDOW, :);
+            [ix, tday] = V.U.tod_daily_idx(tcol(TCw), tgt, TOD_WINDOW);
+            TC = TCw(ix(tday >= t0 & tday < t1), :);
+            if isempty(TC)
+                show_msg(['No daily captures within ' char(177) '1 h of ' ...
+                          char(tgt, 'hh:mm') ' in the selected date range.']);
+                return;
+            end
+            tod_note = [' — daily @ ' char(tgt, 'hh:mm') ' ' char(177) '1 h'];
+        else
+            TC = S.CAND(tcol(S.CAND) >= t0 & tcol(S.CAND) < t1, :);
+            if isempty(TC)
+                show_msg('No candidate rows in the selected date range.');
+                return;
+            end
         end
         m = regexp(kind, '\((\d+)\)', 'tokens', 'once');
         if isempty(m)
@@ -127,6 +155,7 @@ function soop_viewer_render_l2(V, kind)
             y_ph = wrap_deg(y_ph + dlt);
             phase_label = [phase_label ' + phase offset cal'];
         end
+        phase_label = [phase_label tod_note];   % '' unless the daily filter is on
         agg = S.dd_agg.Value;
         % Weather rows in range (depth + temperatures share this table). Each
         % overlay is gated by its checkbox AND the presence of finite data.

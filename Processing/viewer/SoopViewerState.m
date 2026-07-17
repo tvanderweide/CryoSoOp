@@ -117,6 +117,9 @@ classdef SoopViewerState < handle
         ampscale_row
         sw_detrend
         detrend_row
+        cb_tod
+        ef_tod
+        tod_row
         cb_geom_r2
         cb_geom_r1
         cb_geom_aeff

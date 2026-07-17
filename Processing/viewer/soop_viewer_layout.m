@@ -122,10 +122,10 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [21 1]);
-    % Rows 12/13 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [22 1]);
+    % Rows 13/14 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -245,6 +245,24 @@ function soop_viewer_layout(V)
                               'Value', false, 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.detrend_row = detrend_row;
     S.detrend_row.Visible = 'off';
+
+    % Daily time-of-day filter — shown only for the three 'L2: Candidates'
+    % views. When ticked, each target day keeps one capture: the one nearest
+    % the entered time (H, HHMM, or HH:MM; capture/Pi clock); days whose
+    % nearest capture is over 1 h away are dropped (TOD_WINDOW in
+    % soop_viewer_render_l2).
+    tod_row = uigridlayout(info_gl, [1 2]);
+    tod_row.ColumnWidth = {'1x', 64};
+    tod_row.Padding = [0 0 0 0];
+    S.cb_tod = uicheckbox(tod_row, 'Text', 'Daily capture nearest', ...
+                          'Value', false, 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.ef_tod = uieditfield(tod_row, 'text', 'Value', '0600', 'Placeholder', 'HHMM', ...
+        'Tooltip', ['Target time of day (H, HHMM, or HH:MM; capture/Pi ' ...
+                    'clock). Each day keeps its capture nearest this time, ' ...
+                    'within ' char(177) '1 h; farther days are dropped.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.tod_row = tod_row;
+    S.tod_row.Visible = 'off';
 
     % Geometry-series toggles — shown only for 'Radar Cal: geometry (r2c / r1mc /
     % A_eff)'. Each checkbox draws one geometry series: r_2c (= r_d_m) and r_1mc

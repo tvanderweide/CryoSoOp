@@ -2,7 +2,7 @@ function U = soop_viewer_util()
 % UI/label/formatting helpers for BrundageSoOp_viewer. Returns a struct of
 % handles (same idiom as rfi_excise/BrundageSoOp_fun); each takes V first
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
-% src_desc/open_fun).
+% parse_tod/tod_daily_idx/src_desc/open_fun).
     U.range_bounds = @range_bounds;
     U.apply_overrides = @apply_overrides;
     U.style_legend = @style_legend;
@@ -28,6 +28,8 @@ function U = soop_viewer_util()
     U.rfi_dataset_info = @rfi_dataset_info;
     U.plot_series = @plot_series;
     U.tcol = @tcol;
+    U.parse_tod = @parse_tod;
+    U.tod_daily_idx = @tod_daily_idx;
     U.src_desc = @src_desc;
     U.open_fun = @open_fun;
 end
@@ -622,4 +624,69 @@ function open_fun(name)
         % (setting Document.Selection alone moves the cursor but not the view).
         matlab.desktop.editor.openAndGoToLine(file, idx);
     end
+end
+
+
+function [dur, ok] = parse_tod(str)
+% Parse a time-of-day string into a duration. Accepted grammar (anchored,
+% surrounding whitespace ignored): H, HH, HMM, HHMM, H:MM, or HH:MM with
+% hour 0-23 and minute 0-59; anything else -> ok = false. Pure helper
+% (no V) so the L2 daily filter's input handling is testable headlessly.
+    dur = duration(NaN, 0, 0);
+    ok  = false;
+    s   = strtrim(char(str));
+    tok = regexp(s, '^(\d{1,2}):(\d{2})$', 'tokens', 'once');     % H:MM / HH:MM
+    if isempty(tok)
+        tok = regexp(s, '^(\d{1,2})(\d{2})$', 'tokens', 'once');  % HMM / HHMM
+    end
+    if isempty(tok)
+        tok = regexp(s, '^(\d{1,2})$', 'tokens', 'once');         % H / HH
+        if ~isempty(tok), tok{2} = '00'; end
+    end
+    if isempty(tok), return; end
+    hh = str2double(tok{1});
+    mm = str2double(tok{2});
+    if hh > 23 || mm > 59, return; end
+    dur = hours(hh) + minutes(mm);
+    ok  = true;
+end
+
+
+function [idx, tday] = tod_daily_idx(t, target, win)
+% One capture per target day: the capture nearest each day's nominal target
+% instant (day + target), kept only when that distance is <= win. Days are
+% target-centered (each capture is assigned to the nearest nominal instant,
+% not grouped by calendar date), so a near-midnight target binds
+% post-midnight captures to the correct day. t must be unzoned (naive
+% wall-clock) datetimes — the capture timebase read_product produces; for
+% zoned datetimes timeofday/dateshift diverge from the displayed clock on
+% DST days, so zoned input errors. Ties at equal distance keep the earliest
+% original row. Returns ascending original indices idx and, aligned with
+% them, the nominal target days tday (day-start datetimes).
+    if ~isempty(t.TimeZone)
+        error('soop_viewer_util:tod_daily_idx:zoned', ...
+              'tod_daily_idx requires unzoned (wall-clock) datetimes.');
+    end
+    t    = t(:);
+    orig = (1:numel(t))';
+    keep = ~isnat(t);
+    t    = t(keep);
+    orig = orig(keep);
+    if isempty(t)
+        idx  = zeros(0, 1);
+        tday = NaT(0, 1);
+        return;
+    end
+    % Nearest nominal target day: minimizing |t - (day + target)| over
+    % calendar days is rounding (t - target) to the nearest day boundary.
+    d_near = dateshift((t - target) + hours(12), 'start', 'day');
+    dist   = abs(t - (d_near + target));
+    % Sort by (day, distance, original index); the first row per day is its
+    % nearest capture, with equal distances resolved to the earliest row.
+    srt   = sortrows(table(d_near, dist, orig));
+    first = [true; srt.d_near(2:end) ~= srt.d_near(1:end-1)];
+    sel   = first & srt.dist <= win;
+    [idx, ord] = sort(srt.orig(sel));
+    tday  = srt.d_near(sel);
+    tday  = tday(ord);
 end

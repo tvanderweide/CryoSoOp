@@ -352,11 +352,13 @@ function render_now(V)
             'snow depth). Clear = mean over the top date range.'];
     end
 
-    % Weather-overlay toggles (snow depth + the two temperatures) apply only to
-    % the L2: Candidates views, which now carry the optional overlay.
+    % Weather-overlay toggles (snow depth + the two temperatures) and the
+    % side-panel daily time-of-day filter row apply only to the L2:
+    % Candidates views.
     is_cand = startsWith(kind, 'L2: Candidates');
     set([S.cb_depth, S.cb_airtc, S.cb_tempc], ...
         'Visible', matlab.lang.OnOffSwitchState(is_cand));
+    S.tod_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
 
     % Expand the RFI control row for both season RFI views. The interactive
     % explorer ('Raw: Season RFI spectrum') uses every control; the
