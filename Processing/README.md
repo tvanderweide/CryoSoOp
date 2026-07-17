@@ -124,8 +124,28 @@ captures in both layouts without a format flag:
   `.dat` captures, `events.csv`, `RunLog.log`, `config_effective.yaml`, and
   `summary.json`. `cfg.data_dir` should point at `<DATA_ROOT>`; the nested
   run folders are found automatically. Every downstream path is built from
-  the actual hit's `.folder` (never assumed relative to `cfg.data_dir`), so
-  captures from different run folders are never conflated.
+  the actual hit's `.folder` (never assumed relative to `cfg.data_dir`).
+  Mixed trees (flat legacy files at the root plus per-run subfolders) are
+  handled per capture: subfolder captures group by their exact containing
+  folder, root captures by time gaps.
+
+**Session identity (schema v6, 2026-07-17)**: one cryosoop run folder ==
+one UHD session, and that identity is persisted. `compute_L1` and
+`compute_calib` write a `session_id` column into their CSVs — the
+`<YYYYMMDD>/<HHMMSS>` run-folder key, `legacy-flat` (capture at the data
+root), or `unknown` (raw file missing / ambiguous mapping; fails closed —
+excluded from chain calibration) — and patch existing CSVs in place from a
+metadata-only disk scan (no reprocessing; a stage errors rather than
+appending to an unmigrated file). `compute_L2`'s chain-phase calibration
+joins session-keyed captures to their own session's calib run by exact
+identity (elapsed time is diagnostic only), keeps the historical
+nearest-run-in-time join for `legacy-flat` rows, and records the
+association per row (`chain_session` column). Before appending
+incrementally it checks a config/algorithm stamp
+(`BrundageSoOp_L2_chaincal_stamp.json`) AND recomputes every existing
+row's chain association — any difference (config change, shifted session
+mean, newly usable calibration, repaired provenance) forces a full (cheap)
+L2 rebuild plus a sigma0 `_stale_*` rename.
 
 A handful of other contract details changed with the cryosoop acquisition
 program and are handled transparently by the stages, but are worth knowing

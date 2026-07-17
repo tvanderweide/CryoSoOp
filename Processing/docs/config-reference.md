@@ -228,19 +228,19 @@ Hidden fallbacks, i.e. values used only if the corresponding `cfg` field is
 absent/empty. All confirmed directly from `getfield_default`/`getdef` calls
 in the stage source (not inferred).
 
-**compute_L2** (`getfield_default`) — **corrected 2026-07-06**: only
-`chain_run_gap_min` and `chain_join_tol_min` are actually left to these
-fallbacks in production; `chain_phase_ref_deg` IS set explicitly by
-`BrundageSoOp.m` (line 65: `cfg.chain_phase_ref_deg = -81.4;`), overriding
-its fallback below. The code fallback itself is also negative
-(`getfield_default(cfg, 'chain_phase_ref_deg', -81.4)` in
-`compute_L2.m`), not `+81.4` as this table previously stated:
+**compute_L2** (`getfield_default`) — only `chain_run_gap_min` and
+`chain_join_tol_min` are actually left to these fallbacks in production;
+`chain_phase_ref_deg` IS set explicitly by `BrundageSoOp.m`
+(`cfg.chain_phase_ref_deg = 0;`), matching the code fallback
+(`getfield_default(cfg, 'chain_phase_ref_deg', 0)` in `compute_L2.m`) —
+both changed from `-81.4` to `0` on 2026-07-17, see
+[Chain-cal knobs](#chain-cal-knobs):
 
 | Field | Fallback | Notes |
 |---|---|---|
-| `chain_run_gap_min` | `20` | not set by the entry script; see [Chain-cal knobs](#chain-cal-knobs) |
-| `chain_join_tol_min` | `60` | not set by the entry script; see [Chain-cal knobs](#chain-cal-knobs) |
-| `chain_phase_ref_deg` | `-81.4` | **set explicitly by the entry script** (also `-81.4`, matching the fallback) — see [Chain-cal knobs](#chain-cal-knobs) |
+| `chain_run_gap_min` | `20` | not set by the entry script; legacy-flat gap grouping only — see [Chain-cal knobs](#chain-cal-knobs) |
+| `chain_join_tol_min` | `60` | not set by the entry script; hard limit for legacy-flat joins, diagnostic-only for session-keyed joins — see [Chain-cal knobs](#chain-cal-knobs) |
+| `chain_phase_ref_deg` | `0` | **set explicitly by the entry script** (also `0`, matching the fallback; both were `-81.4` before 2026-07-17) — see [Chain-cal knobs](#chain-cal-knobs) |
 
 **compute_rfi_spectrum** (`getdef`) — the "hidden" set below is never set by
 the entry script at all (no corresponding `cfg.*` assignment exists in
@@ -295,35 +295,68 @@ went through `BrundageSoOp.m`).
 
 ## Chain-cal knobs
 
-From compute_L2.m's chain-phase calibration block (schema 2026-07-04),
-relocated here verbatim:
+The three knobs, all overridable from cfg:
 
-> Chain-cal knobs, all overridable from cfg (kept together here):
->   `chain_run_gap_min`  — calib rows further apart than this start a new run
->   `chain_join_tol_min` — max |capture time - calib run time| to accept
->   `chain_phase_ref_deg`— FIXED reference subtracted so the correction is
->                          ~zero-mean; keep constant across reprocessing so
->                          incremental appends stay consistent (81.4 = season
->                          circular mean of the notch chain series, 2026-07-04).
+- `chain_run_gap_min` — legacy-flat calib rows further apart than this start
+  a new gap run (20). Session-keyed rows ignore it: one cryosoop run folder
+  (`session_id` = `<YYYYMMDD>/<HHMMSS>`) is one run by identity.
+- `chain_join_tol_min` — max |capture time − calib run time| for the
+  legacy-flat nearest-run join (60). Session-keyed joins are exact identity
+  joins with **no time limit**; the tolerance only fires a diagnostic
+  (`WARNING(chaincal-key)`) if a same-session match is suspiciously far away.
+- `chain_phase_ref_deg` — FIXED reference subtracted together with the
+  per-session chain phase: `phase_corr_cal = wrap180(phase_corr −
+  (phase_chain − ref))`.
 
-**Corrected 2026-07-06**: `chain_run_gap_min` and `chain_join_tol_min` are
-not set by the entry script, so those two use the fallbacks above (20 / 60).
-`chain_phase_ref_deg` IS set explicitly by the entry script
-(`BrundageSoOp.m` line 65: `cfg.chain_phase_ref_deg = -81.4;`) — the value in
-production is `-81.4`, matching the (also `-81.4`) code fallback, not the
-positive `81.4` this page previously showed. The magnitude, 81.4 deg, is
-still the same season-specific circular-mean constant computed 2026-07-04;
-only the documented sign was wrong. It should still be treated as a
-season-specific constant, not a universal one — if the receiver chain phase
-steps (UHD/firmware/hardware change), this value needs re-deriving from a
-fresh circular mean of the notch chain series.
+**Reference = 0 (decision 2026-07-17, full per-session subtraction)**: both
+the entry script and the code fallback are now `0`, so each capture is
+corrected by its own UHD session's measured inter-channel chain phase alone —
+no season-derived constant, nothing to re-derive after a UHD/firmware/
+hardware step (the per-session measurement absorbs the step by construction).
+This zeroes the calibrated phase at the calibration injection reference
+plane, the same full-offset behavior as the Ettus gr-doa direction-finding
+correction. Calibrated phase columns therefore sit ~`−phase_chain` (~+81 deg)
+offset from the uncorrected columns; circular differences, trends, and
+sigma0 magnitudes are unaffected by the constant.
+
+History: from 2026-07-04 to 2026-07-17 the reference was the 2025-26
+season circular mean of the notch chain series (`+81.4`, then `−81.4` after
+the 2026-07-06 v5 conjugation unification below), which made the *applied*
+correction ~zero-mean — a monitoring/insurance framing. That season-specific
+anchor was retired with the switch to full per-session subtraction; changing
+the reference now invalidates the chain-cal dependency stamp and triggers a
+one-time full L2 rebuild (see below), so mixed-reference product files
+cannot occur.
+
+**Session-keyed join + dependency stamp (2026-07-17)**: calib and L1 CSVs
+carry a `session_id` sentinel (schema v6; `lib/session_key.m`): the
+`<YYYYMMDD>/<HHMMSS>` run-folder key (one cryosoop folder == one UHD
+session), `legacy-flat` (data-root capture, time-gap grouping), or `unknown`
+(fails closed: no chain cal). compute_L2 records the association per row in
+`chain_session` and gates incremental appends on two checks made before the
+existing-row filter: the config/algorithm stamp
+(`BrundageSoOp_L2_chaincal_stamp.json`: algorithm version + the three knobs;
+the run table is stored for provenance) must match, and every existing row's
+freshly recomputed chain association (phase + session) must equal what it
+has stored. Any difference — reference or knob change, algorithm change,
+late-added pairs shifting a session mean, repaired overflow flags or
+session_id values, newly usable calibration (e.g. after the v6 migration),
+a regenerated calib CSV — archives and rebuilds the whole L2 CSV (cheap)
+and renames any sigma0 product aside (`_stale_*`).
+
+**Frequency-flat assumption (accepted 2026-07-17)**: one full-band, lag-zero
+chain phase is applied to all three phase domains (sinc / fd / fd_muos).
+The `nl_peak_lag` / `l_peak_lag` calib diagnostics exist if a differential
+group delay or band-dependent chain response is ever suspected; known
+caveat — the notch method's state-specific NL/L RFI operators degrade the
+baseline cancellation (~0.5 vs ~0.1 deg season scatter), accepted as-is.
 
 **Sign convention, updated 2026-07-06 (schema v5 conjugation unification)**:
 as of the cryosoop-port adaptation, `compute_calib` correlates `D.*conj(R)`
 (the same convention `compute_L1` already used),
 so `compute_L2`'s chain term now **SUBTRACTS** from the signal phase (it
 previously ADDED, back when `compute_calib` correlated the opposite order,
-`R.*conj(D)`). The reference constant's sign flipped to match (`-81.4`, was
-`+81.4`). This is a scientific/sign-convention change and must
-be re-checked (not assumed) if the receiver chain phase or the calib
-conjugation convention changes again.
+`R.*conj(D)`). This is a scientific/sign-convention change and must
+be re-checked (not assumed) if the calib conjugation convention changes
+again; pre-v5 calib CSVs store negated phases and are archived + reprocessed
+by `compute_calib` before use.

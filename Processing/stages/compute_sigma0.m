@@ -76,8 +76,9 @@ function compute_sigma0(cfg)
 %   out_dir, freq_hz, fs, Ti, num_segs, tower_h_m, muos_bands, capture_tz,
 %   elev_table, and (all via getfield_default so the stage runs standalone):
 %   sigma0_corr_family (default 'fd_muos'; also 'fd', 'td'),
-%   sigma0_cal_max_age_hr (default 1.0 h = compute_L2's 60-min chain-cal
-%       tolerance), sigma0_win_hours (24), sigma0_min_count (5),
+%   sigma0_cal_max_age_hr (default 1.0 h; matches compute_L2's 60-min
+%       LEGACY gap-join tolerance — session-keyed chain joins there have no
+%       time limit), sigma0_win_hours (24), sigma0_min_count (5),
 %   sigma0_min_elev_deg (5), sigma0_min_dsnr_db (10),
 %   ant_gain_direct_dbi (2), ant_gain_reflected_dbi (2). The direct antenna is
 %   RHCP and the reflected LHCP; both are the co-pol expected signal, so no
@@ -259,7 +260,7 @@ function compute_sigma0(cfg)
 
     % --- Calibration join (nearest calib run within tolerance) -----------
     min_elev = getfield_default(cfg, 'sigma0_min_elev_deg', 5);
-    cal_tol_hr = getfield_default(cfg, 'sigma0_cal_max_age_hr', 1.0);  % = L2 chain 60 min
+    cal_tol_hr = getfield_default(cfg, 'sigma0_cal_max_age_hr', 1.0);  % = L2 legacy gap join 60 min
     if isfile(calib_csv)
         [G_De, G_Re, P_DN, cal_age_s, flag_cal_missing] = ...
             join_calib(calib_csv, t, cal_tol_hr);

@@ -119,7 +119,8 @@ function [dlt, ok, why] = chaincal_delta(V, TT)
     wrap_deg = V.U.wrap_deg;
     % Per-row chain-phase correction wrap180(phase_corr_cal_deg -
     % phase_corr_deg) from the active product dir's L2 CSV, joined to TT by
-    % base_name (== phase_chain_deg - cfg.chain_phase_ref_deg; identical
+    % base_name (== -(phase_chain_deg - cfg.chain_phase_ref_deg), i.e.
+    % ref - phase_chain_deg — the sign the L2 runtime applies; identical
     % for all phase domains, so one delta serves sinc/fd/muos columns).
     % Rows without an L2 match or with NaN chain phase get NaN (dropped
     % from the plot rather than silently left uncorrected). ok=false with a

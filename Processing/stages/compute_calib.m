@@ -34,9 +34,9 @@ function compute_calib(cfg)
 %
 % Output: cfg.out_dir/BrundageSoOp_calib.csv (appended per batch — an
 % interrupted run resumes from the last completed batch). Current schema
-% (v5) columns include rho_DRL, rho_DRNS, SNR_DNS (Eq. 39a), SNR_RNS
+% (v6) columns include rho_DRL, rho_DRNS, SNR_DNS (Eq. 39a), SNR_RNS
 % (Eq. 39b), P_NS, overflow_flag, nl_peak_lag, l_peak_lag, n_samps_nl,
-% n_samps_l.
+% n_samps_l, session_id.
 %
 % Schema history v1->v5 (each old version archived to *_v<N>_<date>.csv
 % and reprocessed):
@@ -47,6 +47,14 @@ function compute_calib(cfg)
 %   correlation convention to D.*conj(R), so the v5 phase columns are the
 %   negation of v1-v4 (values are NOT comparable to older CSVs except by
 %   negation).
+%
+% Schema v6 (2026-07-17) adds session_id — the UHD-session sentinel used by
+% compute_L2's chain-phase calibration join: the "<YYYYMMDD>/<HHMMSS>" run-
+% folder key (cryosoop layout, one folder == one UHD session), "legacy-flat"
+% (capture at the data root), or "unknown" (fails closed: excluded from chain
+% cal). Unlike v1->v5, v6 is a CSV-only logical migration: existing v5 CSVs
+% are patched in place from a metadata-only disk scan (lib/session_key.m),
+% no raw reprocessing.
 %
 % overflow_flag (0/1): set if either file in the NL/L pair was flagged by
 % find_overflows (cfg.overflow_file); such pairs' rho_DRL/rho_DRNS are
@@ -104,6 +112,23 @@ function compute_calib(cfg)
 
     nl_bases = string(erase({nl_ch0.name}', '_ch0.dat'));
     l_bases  = string(erase({l_ch0.name}',  '_ch0.dat'));
+
+    % --- Session identity (schema v6): one cryosoop run folder == one UHD
+    %     session. Sentinels per capture (lib/session_key.m): the validated
+    %     "<YYYYMMDD>/<HHMMSS>" key, "legacy-flat" (data-root capture), or
+    %     "unknown" (fails closed downstream). The base->sentinel maps feed
+    %     the v6 in-place CSV patch below; a base name found in more than one
+    %     distinct session is ambiguous -> "unknown". ---
+    dr        = dir(cfg.data_dir);
+    root_fold = string(dr(1).folder);          % data_dir as dir() spells it
+    nl_sids   = arrayfun(@(h) session_key(h.folder, root_fold), nl_ch0);
+    l_sids    = arrayfun(@(h) session_key(h.folder, root_fold), l_ch0);
+    [map_b, map_s, n_ambig] = base_sid_map([nl_bases; l_bases], [nl_sids; l_sids]);
+    if n_ambig > 0
+        fprintf(['[calib] WARNING(session-key): %d capture base name(s) appear in ' ...
+                 'more than one session folder — their rows get session_id ' ...
+                 '"unknown" (excluded from chain cal).\n'], n_ambig);
+    end
 
     % --- Incremental update + schema upkeep, PER METHOD ---
     % Per-method incremental (same pattern as compute_L1); old-schema CSVs in
@@ -183,6 +208,43 @@ function compute_calib(cfg)
         end
     end
 
+    % --- Patch existing calib CSV(s) if session_id column is missing (v6) ---
+    % Schema v6 = v5 + session_id, a CSV-only logical migration (numeric values
+    % unchanged, NO raw reprocessing): map each row's nl_base AND l_base to the
+    % on-disk session sentinel and require agreement. Rows whose captures are
+    % no longer on disk, map ambiguously, or disagree between NL and L become
+    % "unknown" (excluded from chain cal downstream — fail closed). Atomic:
+    % temp file + rename. A patch failure is a HARD ERROR: appending v6 rows to
+    % an unmigrated CSV would misalign columns.
+    for mi = 1:nM
+        oc = out_calib{mi};
+        if ~isfile(oc), continue; end
+        try
+            existing = readtable(oc, 'TextType', 'string');
+            if ~ismember('session_id', existing.Properties.VariableNames)
+                nl_s = sid_of(existing.nl_base, map_b, map_s);
+                l_s  = sid_of(existing.l_base,  map_b, map_s);
+                sid  = nl_s;
+                sid(nl_s ~= l_s) = "unknown";
+                existing.session_id = sid;
+                tmp = strrep(oc, '.csv', '_patch_tmp.csv');   % writetable needs a .csv extension
+                writetable(existing, tmp);
+                chk = readtable(tmp, 'TextType', 'string');   % validate before replacing
+                assert(height(chk) == height(existing) && ...
+                       isequal(chk.Properties.VariableNames, existing.Properties.VariableNames), ...
+                       'row/column mismatch after patch write');
+                movefile(tmp, oc);
+                fprintf(['[calib] Patched %s with session_id (schema v6): %d keyed, ' ...
+                         '%d legacy-flat, %d unknown row(s).\n'], oc, ...
+                        sum(sid ~= "legacy-flat" & sid ~= "unknown"), ...
+                        sum(sid == "legacy-flat"), sum(sid == "unknown"));
+            end
+        catch ME
+            error(['compute_calib: could not patch session_id into %s (%s). ' ...
+                   'Refusing to append v6 rows to an unmigrated CSV.'], oc, ME.message);
+        end
+    end
+
     % --- Group all cal captures into runs, then rank-pair NL<->L per run ---
     % Runs are keyed by containing folder when captures live in per-run
     % subfolders (cryosoop <YYYYMMDD>/<HHMMSS>/ layout); when every capture
@@ -214,22 +276,34 @@ function compute_calib(cfg)
         all_ts(bad_ts)   = []; all_fold(bad_ts) = [];
     end
 
-    % Assign a run id to every remaining capture.
-    if numel(unique(all_fold)) > 1
-        % Per-run subfolders: the containing folder IS the run.
-        [~, ~, run_id] = unique(all_fold);
-    else
-        % Flat directory: split the chronological stream on large time gaps
-        % (all_fold is no longer needed once we know there is a single folder).
-        [all_ts, so] = sort(all_ts);
-        all_isnl = all_isnl(so);  all_idx = all_idx(so);
-        run_id = cumsum([1; seconds(diff(all_ts)) > run_gap_sec]);
+    % Assign a run id to every remaining capture — PER CAPTURE, so mixed
+    % layouts are safe (corrected 2026-07-17: the previous dataset-wide
+    % folder-count branch would have rank-paired an entire flat legacy season
+    % as one run whenever any per-run subfolder was also present). Captures in
+    % per-run subfolders group by exact containing folder (a cryosoop folder
+    % IS a UHD session); root-level (legacy flat) captures are independently
+    % split on time gaps > run_gap_sec, exactly like the retired tree.
+    is_root = (all_fold == root_fold);
+    run_id  = zeros(numel(all_ts), 1);
+    if any(~is_root)
+        [~, ~, fid] = unique(all_fold(~is_root));   % one run per folder
+        run_id(~is_root) = fid;
+    end
+    n_fold_runs = max([run_id; 0]);
+    ri = find(is_root);
+    if ~isempty(ri)
+        [rts, so] = sort(all_ts(ri));
+        ri = ri(so);
+        run_id(ri) = n_fold_runs + cumsum([1; seconds(diff(rts)) > run_gap_sec]);
     end
 
-    jobs = struct('nl', {}, 'l', {}, 'nl_base', {}, 'l_base', {});
+    jobs = struct('nl', {}, 'l', {}, 'nl_base', {}, 'l_base', {}, 'session_id', {});
     job_needed = false(0, nM);   % which methods each job still needs
     for r = reshape(unique(run_id), 1, [])
         in_run = (run_id == r);
+        % Session sentinel for this run (all members share one folder by
+        % construction: folder-keyed runs trivially, gap runs are all root).
+        sid_r  = session_key(all_fold(find(in_run, 1)), root_fold);
         nl_sel = find(in_run &  all_isnl);
         l_sel  = find(in_run & ~all_isnl);
         % Chronological order within the run.
@@ -266,7 +340,8 @@ function compute_calib(cfg)
             j = all_idx(l_sel(jk));   % index into l_ch0
 
             jobs(end+1) = struct('nl', nl_ch0(i), 'l', l_ch0(j), ...
-                                 'nl_base', nl_bases(i), 'l_base', l_bases(j)); %#ok<AGROW>
+                                 'nl_base', nl_bases(i), 'l_base', l_bases(j), ...
+                                 'session_id', sid_r); %#ok<AGROW>
             job_needed(end+1, :) = need; %#ok<AGROW>
         end
     end
@@ -489,6 +564,8 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
         row.l_peak_lag       = l_lags(mi);    % v4: measured L  ch0xch1 argmax lag
         row.n_samps_nl       = n_samps_nl;    % v5: complex samples read from NL capture
         row.n_samps_l        = n_samps_l;     % v5: complex samples read from L capture
+        row.session_id       = job.session_id; % v6: UHD-session sentinel (LAST —
+                                               % matches the in-place column patch)
         rows{mi} = row;
     end
 end
@@ -587,4 +664,27 @@ end
 function v = getfield_default(s, name, default)
 % cfg field with a fallback when absent/empty.
     if isfield(s, name) && ~isempty(s.(name)), v = s.(name); else, v = default; end
+end
+
+
+% =========================================================================
+function [ub, us, n_ambig] = base_sid_map(bases, sids)
+% Unique base -> session-sentinel map for the schema-v6 CSV patch. A base
+% name observed with more than one distinct sentinel (duplicate captures in
+% different session folders) is ambiguous -> "unknown".
+    [ub, ~, ic] = unique(bases);
+    us = strings(size(ub));
+    for k = 1:numel(ub)
+        s = unique(sids(ic == k));
+        if isscalar(s), us(k) = s; else, us(k) = "unknown"; end
+    end
+    n_ambig = sum(arrayfun(@(k) numel(unique(sids(ic == k))) > 1, (1:numel(ub))'));
+end
+
+
+function s = sid_of(bases, map_b, map_s)
+% Sentinel lookup for CSV rows; bases not on disk any more -> "unknown".
+    s = repmat("unknown", numel(bases), 1);
+    [tf, loc] = ismember(bases, map_b);
+    s(tf) = map_s(loc(tf));
 end

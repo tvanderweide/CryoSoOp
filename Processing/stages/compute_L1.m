@@ -14,7 +14,10 @@ function compute_L1(cfg)
 % peak_phase_deg, snr_db, noise_floor, segments_processed, file_size_bytes,
 % overflow_flag, peak_amplitude_fd, peak_phase_deg_fd, peak_amplitude_fd_muos,
 % peak_phase_deg_fd_muos, pow_ch0_fd, pow_ch0_fd_muos, pow_ch1_fd,
-% pow_ch1_fd_muos.
+% pow_ch1_fd_muos, session_id (v6, 2026-07-17: UHD-session sentinel —
+% "<YYYYMMDD>/<HHMMSS>" run-folder key, "legacy-flat", or "unknown"; existing
+% CSVs are patched in place from a metadata-only disk scan, no reprocessing —
+% see lib/session_key.m and compute_L2's chain-cal join).
 %   - meas_peak_lag: MEASURED discrete argmax of |R_xy| over +-lag_half_win
 %     (diagnostic only — the observable is always extracted at cfg.peak_lag).
 %   - peak_amplitude_fd/peak_phase_deg_fd: cross-spectrum evaluated at
@@ -84,6 +87,21 @@ function compute_L1(cfg)
                       rd, string(cfg.capture_tz));
             end
         end
+    end
+
+    % --- Session identity (schema v6): one cryosoop run folder == one UHD
+    %     session. Sentinel per capture (lib/session_key.m): the validated
+    %     "<YYYYMMDD>/<HHMMSS>" key, "legacy-flat" (data-root capture), or
+    %     "unknown" (fails closed in compute_L2's chain-cal join). Duplicate
+    %     base names in different session folders are ambiguous -> "unknown". ---
+    dr        = dir(cfg.data_dir);
+    root_fold = string(dr(1).folder);          % data_dir as dir() spells it
+    file_sids = arrayfun(@(h) session_key(h.folder, root_fold), ch0_files);
+    [map_b, map_s, n_ambig] = base_sid_map(base_names, file_sids);
+    if n_ambig > 0
+        fprintf(['[L1] WARNING(session-key): %d capture base name(s) appear in ' ...
+                 'more than one session folder — their rows get session_id ' ...
+                 '"unknown" (excluded from chain cal).\n'], n_ambig);
     end
 
     % --- RFI excision methods + per-method output directories ---
@@ -197,6 +215,39 @@ function compute_L1(cfg)
         end
     end
 
+    % --- Patch existing L1 CSV(s) if session_id column is missing (v6) ---
+    % Schema v6 = previous schema + session_id, a CSV-only logical migration
+    % (no signal reprocessing): map each row's base_name to its on-disk
+    % session sentinel. Rows whose captures are no longer on disk or map
+    % ambiguously become "unknown" (excluded from chain cal downstream —
+    % fail closed). Atomic: temp file + rename. A patch failure is a HARD
+    % ERROR: appending v6 rows to an unmigrated CSV would misalign columns.
+    for mi = 1:nM
+        os = out_sig{mi};
+        if ~isfile(os), continue; end
+        try
+            existing = readtable(os, 'TextType', 'string');
+            if ~ismember('session_id', existing.Properties.VariableNames)
+                sid = sid_of(existing.base_name, map_b, map_s);
+                existing.session_id = sid;
+                tmp = strrep(os, '.csv', '_patch_tmp.csv');   % writetable needs a .csv extension
+                writetable(existing, tmp);
+                chk = readtable(tmp, 'TextType', 'string');   % validate before replacing
+                assert(height(chk) == height(existing) && ...
+                       isequal(chk.Properties.VariableNames, existing.Properties.VariableNames), ...
+                       'row/column mismatch after patch write');
+                movefile(tmp, os);
+                fprintf(['[L1] Patched %s with session_id (schema v6): %d keyed, ' ...
+                         '%d legacy-flat, %d unknown row(s).\n'], os, ...
+                        sum(sid ~= "legacy-flat" & sid ~= "unknown"), ...
+                        sum(sid == "legacy-flat"), sum(sid == "unknown"));
+            end
+        catch ME
+            error(['compute_L1: could not patch session_id into %s (%s). ' ...
+                   'Refusing to append v6 rows to an unmigrated CSV.'], os, ME.message);
+        end
+    end
+
     needed = false(numel(base_names), nM);
     for mi = 1:nM
         needed(:, mi) = ~ismember(base_names, done{mi});
@@ -258,14 +309,15 @@ function compute_L1(cfg)
             % Serial with GPU: one 18M-point FFT at a time on the A30.
             for k = 1:nb
                 f = ch0_files(bi(k));
-                [rows{k}, rejects{k}] = process_pair(f, base_names(bi(k)), cfg, win, npts, overflow_set, methods, apply_rfi, excis, ramp, muos_mask);
+                [rows{k}, rejects{k}] = process_pair(f, base_names(bi(k)), file_sids(bi(k)), cfg, win, npts, overflow_set, methods, apply_rfi, excis, ramp, muos_mask);
             end
         else
             f_batch    = ch0_files(bi);
             base_batch = base_names(bi);
+            sid_batch  = file_sids(bi);
             ovf_set    = overflow_set;   % broadcast to parfor workers
             parfor k = 1:nb
-                [rows{k}, rejects{k}] = process_pair(f_batch(k), base_batch(k), cfg, win, npts, ovf_set, methods, apply_rfi, excis, ramp, muos_mask);
+                [rows{k}, rejects{k}] = process_pair(f_batch(k), base_batch(k), sid_batch(k), cfg, win, npts, ovf_set, methods, apply_rfi, excis, ramp, muos_mask);
             end
         end
 
@@ -301,7 +353,7 @@ end
 
 
 % =========================================================================
-function [rows, rej] = process_pair(f_ch0, base_name, cfg, win, npts, overflow_set, methods, apply_rfi, excis, ramp, muos_mask)
+function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overflow_set, methods, apply_rfi, excis, ramp, muos_mask)
 % Process one ch0/ch1 pair: read both channels once, then for EACH RFI method
 % form the cross-correlation and extract amplitude/phase/SNR at cfg.peak_lag.
 % Returns rows = 1xnumel(methods) cell (one L1 row struct per method, in the
@@ -454,6 +506,8 @@ function [rows, rej] = process_pair(f_ch0, base_name, cfg, win, npts, overflow_s
         row.pow_ch0_fd_muos        = pow_ch0_fd_muos;
         row.pow_ch1_fd             = pow_ch1_fd;
         row.pow_ch1_fd_muos        = pow_ch1_fd_muos;
+        row.session_id             = sid;   % v6: UHD-session sentinel (LAST —
+                                            % matches the in-place column patch)
         rows{mi} = row;
     end
 end
@@ -562,4 +616,28 @@ end
 function v = getfield_default(s, name, default)
 % cfg field with a fallback when absent/empty (keeps {'none'} the default).
     if isfield(s, name) && ~isempty(s.(name)), v = s.(name); else, v = default; end
+end
+
+
+% =========================================================================
+function [ub, us, n_ambig] = base_sid_map(bases, sids)
+% Unique base -> session-sentinel map for the schema-v6 CSV patch. A base
+% name observed with more than one distinct sentinel (duplicate captures in
+% different session folders) is ambiguous -> "unknown". (Same helper as
+% compute_calib — stages stay self-contained.)
+    [ub, ~, ic] = unique(bases);
+    us = strings(size(ub));
+    for k = 1:numel(ub)
+        s = unique(sids(ic == k));
+        if isscalar(s), us(k) = s; else, us(k) = "unknown"; end
+    end
+    n_ambig = sum(arrayfun(@(k) numel(unique(sids(ic == k))) > 1, (1:numel(ub))'));
+end
+
+
+function s = sid_of(bases, map_b, map_s)
+% Sentinel lookup for CSV rows; bases not on disk any more -> "unknown".
+    s = repmat("unknown", numel(bases), 1);
+    [tf, loc] = ismember(bases, map_b);
+    s(tf) = map_s(loc(tf));
 end
