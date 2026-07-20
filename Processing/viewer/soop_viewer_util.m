@@ -2,7 +2,8 @@ function U = soop_viewer_util()
 % UI/label/formatting helpers for BrundageSoOp_viewer. Returns a struct of
 % handles (same idiom as rfi_excise/BrundageSoOp_fun); each takes V first
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
-% parse_tod/tod_daily_idx/phoff_measure/phoff_prep/src_desc/open_fun).
+% parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/src_desc/
+% open_fun).
     U.range_bounds = @range_bounds;
     U.apply_overrides = @apply_overrides;
     U.style_legend = @style_legend;
@@ -32,6 +33,7 @@ function U = soop_viewer_util()
     U.tod_daily_idx = @tod_daily_idx;
     U.phoff_measure = @phoff_measure;
     U.phoff_prep = @phoff_prep;
+    U.phoff_title = @phoff_title;
     U.src_desc = @src_desc;
     U.open_fun = @open_fun;
 end
@@ -508,14 +510,18 @@ function tf = plot_uses_method(kind)
     % True when the Dataset selection affects this plot: every product-CSV
     % plot (it switches cfg.out_dir) plus the live-filtered raw views. The
     % Radar Cal footprint map and specular track are pure forward models (no
-    % product read), so the Dataset selector is greyed out there.
+    % product read), and the two season RFI views read the base-dir
+    % rfi_spectrum products with their own 'RFI set' selector — the Dataset
+    % selector is greyed out for all four.
     raw_filterable = {'Raw: PSD (ch0 & ch1)', 'Raw: Spectrogram', ...
                       'Raw: Cross-correlation profile', ...
                       'Raw: Cross-correlation Comparison', ...
                       'Raw: Time domain', 'Raw: FFT Amplitude'};
     tf = (~startsWith(kind, 'Raw:') || any(strcmp(kind, raw_filterable))) ...
          && ~any(strcmp(kind, {'Radar Cal: footprint map', ...
-                               'Radar Cal: specular track'}));
+                               'Radar Cal: specular track', ...
+                               'RFI: Season spectrum', ...
+                               'RFI: Season PSD — notch effect'}));
 end
 
 
@@ -756,4 +762,23 @@ function D = phoff_prep(ch0, ch1, fs, slice_half)
         D.r1_on = D.r1_off;
     end
     D.ymax = max(abs([D.r0; D.r1_off; D.r1_on]));
+end
+
+
+function tstr = phoff_title(base, phi, rho, sw_on)
+% Title for 'Raw: Phase Offset' (pure so the three states are testable).
+% Rule (user spec 2026-07-20): the phi/rho numbers appear ONLY while the
+% correction is applied — their presence is the on-indicator, so there is
+% no 'correction ON/OFF' text. Switch on with no usable correlation says
+% so explicitly (never a silent no-op).
+    dash = char(8212);
+    if sw_on && isfinite(phi)
+        tstr = sprintf('%s %s phase offset %.1f%s (rho %.2f)', ...
+                       base, dash, rad2deg(phi), char(176), rho);
+    elseif sw_on
+        tstr = sprintf('%s %s phase offset n/a (no usable correlation)', ...
+                       base, dash);
+    else
+        tstr = char(base);
+    end
 end

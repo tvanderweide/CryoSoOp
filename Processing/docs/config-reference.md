@@ -301,6 +301,22 @@ The two knobs, both overridable from cfg:
   joins with **no time limit**; the tolerance only fires a diagnostic
   (`WARNING(chaincal-key)`) if a same-session match is suspiciously far away.
 
+**NL-only estimator (2026-07-20)**: `phase_chain` is the per-session
+equal-weight circular mean of the calib pairs' `C_RDNS` phasors —
+`angle(⟨C_RDNS/|C_RDNS|⟩)`, the two channels' phase difference measured from
+the noise-source (NL) state alone, gr-doa-style (same state and sign
+convention; reducer-level parity with gr-doa's own implementation is not
+claimed). Degenerate inputs fail closed: nonfinite or nonpositive
+`C_RDNS_amp` pairs are excluded before the reduction, and a session whose
+circular-mean resultant is ~zero returns NaN (never a fake `0°`). The
+correlated NL/L inter-channel baseline (measured `rho_DRL ~ 0.2`) is
+**included** in this estimate by choice; per pair its angular effect is
+bounded by `asin(r)` with `r = |C_RDL|/|C_RDNS|` (valid only while `r < 1`,
+and pairwise only — session means carry no hard bound without a
+concentration condition). The actual magnitude is site- and season-specific:
+monitor it as the gap between "Calib: Cross-correlation phase" (applied
+observable) and the "Calib: Chain phase (NS − L)" leak-cancel diagnostic.
+
 **Full per-session subtraction — no reference knob (2026-07-17)**: the
 correction is unconditionally
 `phase_corr_cal = wrap180(phase_corr − phase_chain)` — each capture is
@@ -309,9 +325,10 @@ no season-derived constant, nothing to re-derive after a UHD/firmware/
 hardware step (the per-session measurement absorbs the step by
 construction). This zeroes the calibrated phase at the calibration injection
 reference plane, the same full-offset behavior as the Ettus gr-doa
-direction-finding correction. Calibrated phase columns therefore sit
-~`−phase_chain` (~+81 deg) offset from the uncorrected columns; circular
-differences, trends, and sigma0 magnitudes are unaffected by the constant.
+direction-finding correction. Calibrated phase columns therefore sit offset
+from the uncorrected columns by minus the chain phase (a site-dependent
+value — interesting to plot, never used as a constant in any calculation);
+circular differences and trends are unaffected by the per-session constant.
 
 **Retired reference knob (`chain_phase_ref_deg`) — history**: from
 2026-07-04 to 2026-07-17 a FIXED reference was subtracted alongside the
@@ -327,6 +344,19 @@ only from git history / archived CSVs (accepted — the season products are
 being reprocessed and the legacy anchored outputs dropped). The removal
 bumped the dependency-stamp `algo_version` to 2, so any product built under
 a v1 stamp rebuilds once.
+
+**Retired leak-cancelled estimator (NS − L) — history**: from 2026-07-17 to
+2026-07-20 `phase_chain` used `angle(⟨C_RDNS − C_RDL⟩)` — the complex
+difference cancels the correlated NL/L baseline (`rho_DRL ~ 0.2`) and
+isolates the noise-diode path. Retired 2026-07-20 (user decision, gr-doa
+parity: the correction now uses the NL state alone); the series remains
+plotted as the "Calib: Chain phase (NS − L)" diagnostic. The change bumped
+`algo_version` to 3: products with v1/v2 stamps rebuild once, replacing
+NS−L-derived `phase_chain_deg` / `phase_corr_cal*` values. Note the
+calibrated values shift by the (small, site-specific) NS-vs-NS−L estimator
+difference, and **sigma0/Γ are not numerically invariant** across this
+migration wherever a sliding window spans sessions with different deltas —
+the sigma0 product is archived (`_stale_*`) and recomputed.
 
 **Session-keyed join + dependency stamp (2026-07-17)**: calib and L1 CSVs
 carry a `session_id` sentinel (schema v6; `lib/session_key.m`): the
@@ -347,9 +377,7 @@ product aside (`_stale_*`).
 **Frequency-flat assumption (accepted 2026-07-17)**: one full-band, lag-zero
 chain phase is applied to all three phase domains (sinc / fd / fd_muos).
 The `nl_peak_lag` / `l_peak_lag` calib diagnostics exist if a differential
-group delay or band-dependent chain response is ever suspected; known
-caveat — the notch method's state-specific NL/L RFI operators degrade the
-baseline cancellation (~0.5 vs ~0.1 deg season scatter), accepted as-is.
+group delay or band-dependent chain response is ever suspected.
 
 **Sign convention, updated 2026-07-06 (schema v5 conjugation unification)**:
 as of the cryosoop-port adaptation, `compute_calib` correlates `D.*conj(R)`

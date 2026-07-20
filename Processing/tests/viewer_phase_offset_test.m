@@ -176,6 +176,23 @@ function test_prep_nan_phi_fallback(tc)
 end
 
 
+function test_title_rule(tc)
+    % Title states (user spec 2026-07-20): numbers appear ONLY while the
+    % correction is applied; switch on with unusable correlation says n/a;
+    % switch off shows the bare capture name.
+    U = tc.TestData.U;
+    t_off = U.phoff_title('CAP', -1.42, 0.93, false);
+    verifyEqual(tc, t_off, 'CAP');
+    t_on = U.phoff_title('CAP', deg2rad(-81.4), 0.93, true);
+    verifyTrue(tc, startsWith(t_on, 'CAP'));
+    verifyTrue(tc, contains(t_on, 'phase offset -81.4'));
+    verifyTrue(tc, contains(t_on, 'rho 0.93'));
+    t_na = U.phoff_title('CAP', NaN, NaN, true);
+    verifyTrue(tc, contains(t_na, 'phase offset n/a'));
+    verifyFalse(tc, contains(t_na, 'rho'));
+end
+
+
 % ---------------------------------------------------------------- integration
 
 function test_catalog_entry(tc)

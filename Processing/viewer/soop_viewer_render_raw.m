@@ -166,6 +166,15 @@ function soop_viewer_render_raw(V, kind)
                 D.I0 = real(ch0(idx));  D.Q0 = imag(ch0(idx));
                 D.I1 = real(ch1(idx));  D.Q1 = imag(ch1(idx));
             case 'Raw: Phase Offset'
+                % Always NL-notch-filtered (independent of the Dataset
+                % dropdown): the view models the chain-phase measurement,
+                % and compute_calib excises NL captures with the NL band
+                % set. prep_excis picks bands by the pinned capture type
+                % (NL -> cfg.rfi_bands_nl); empty bands = pass-through,
+                % matching the pipeline's unexcised fallback.
+                excis = prep_excis(numel(ch0), 'notch_interp');
+                ch0 = ifft(Erfi.apply(fft(ch0), 'notch_interp', excis));
+                ch1 = ifft(Erfi.apply(fft(ch1), 'notch_interp', excis));
                 % Contiguous un-decimated slice about the midpoint of the
                 % loaded ~1.8 s analysis window; phi/rho are measured over
                 % the whole loaded window (compute_calib reads the entire
@@ -350,17 +359,11 @@ function soop_viewer_render_raw(V, kind)
             legend(ax, {'CH0 (direct)', leg1}, 'Location', 'best');
             xlabel(ax, ['Time from window midpoint (' char(181) 's)']);
             ylabel(ax, 'Amplitude');
-            dash = char(8212);
-            if isfinite(D.phi)
-                onoff = 'OFF';
-                if corr_on, onoff = 'ON'; end
-                tstr = sprintf('%s %s phase offset %.1f%s (rho %.2f) %s correction %s', ...
-                               base, dash, rad2deg(D.phi), char(176), D.rho, dash, onoff);
-            else
-                tstr = sprintf('%s %s phase offset n/a (no usable correlation)', ...
-                               base, dash);
-            end
-            title(ax, tstr, 'Interpreter', 'none');
+            % Title rule lives in the pure V.U.phoff_title helper (numbers
+            % only while the correction is applied; n/a when on with no
+            % usable correlation) so all three states are unit-tested.
+            title(ax, V.U.phoff_title(base, D.phi, D.rho, ...
+                      strcmp(S.sw_phaseoff.Value, 'On')), 'Interpreter', 'none');
             grid(ax, 'on');
             % Open zoomed to the window midpoint so the inter-channel offset
             % is visible; zoom out interactively for the full plotted slice.

@@ -379,13 +379,13 @@ function render_now(V)
     S.tod_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
 
     % Expand the RFI control row for both season RFI views. The interactive
-    % explorer ('Raw: Season RFI spectrum') uses every control; the
-    % notch-effect view ('Raw: Season PSD — notch effect') shows curated bands,
+    % explorer ('RFI: Season spectrum') uses every control; the
+    % notch-effect view ('RFI: Season PSD — notch effect') shows curated bands,
     % so only the 'RFI set' selector stays enabled there — the threshold/gap/SK
     % and Export controls are disabled (rfi_explorer/rfi_filter_psd read the
     % selector via V.U.rfi_dataset_info).
-    is_explorer = strcmp(kind, 'Raw: Season RFI spectrum');
-    is_notch    = strcmp(kind, 'Raw: Season PSD — notch effect');
+    is_explorer = strcmp(kind, 'RFI: Season spectrum');
+    is_notch    = strcmp(kind, 'RFI: Season PSD — notch effect');
     is_rfi_row  = is_explorer || is_notch;
     rh = gl.RowHeight;  rh{3} = is_rfi_row * 40;  gl.RowHeight = rh;
     S.rfi_row.Visible = matlab.lang.OnOffSwitchState(is_rfi_row);
@@ -399,9 +399,9 @@ function render_now(V)
     try
         if info.uses_cap
             soop_viewer_render_raw(V, kind);
-        elseif strcmp(kind, 'Raw: Season RFI spectrum')
+        elseif strcmp(kind, 'RFI: Season spectrum')
             soop_viewer_render_rfi(V, kind);
-        elseif startsWith(kind, 'Raw: Season PSD —')
+        elseif startsWith(kind, 'RFI: Season PSD —')
             soop_viewer_render_rfi(V, kind);
         elseif startsWith(kind, 'Lag:')
             soop_viewer_render_l1(V, kind);

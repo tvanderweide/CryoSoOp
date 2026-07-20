@@ -1,7 +1,7 @@
 function soop_viewer_render_rfi(V, kind)
-% Season RFI views: the interactive band explorer ('Raw: Season RFI spectrum')
-% and the notch-effect PSD ('Raw: Season PSD - notch effect').
-    if startsWith(kind, 'Raw: Season PSD')
+% Season RFI views: the interactive band explorer ('RFI: Season spectrum')
+% and the notch-effect PSD ('RFI: Season PSD - notch effect').
+    if startsWith(kind, 'RFI: Season PSD')
         rfi_filter_psd(V, kind);
     else
         rfi_explorer(V);

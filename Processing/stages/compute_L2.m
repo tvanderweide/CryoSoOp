@@ -22,11 +22,12 @@ function compute_L2(cfg)
 %
 % Chain-phase calibration columns (schema 2026-07-17, session-keyed):
 % phase_chain_deg is the per-UHD-session receiver-chain differential phase
-% from the same product dir's calib CSV, using the correlated-baseline-
-% cancelled estimator angle(C_RDNS - C_RDL) — the NL and L states share the
-% injection path AND a correlated inter-channel baseline (measured
-% rho_DRL ~ 0.2), so the complex difference cancels the baseline and isolates
-% the noise-diode path. Sessions come from the schema-v6 session_id sentinels
+% from the same product dir's calib CSV, using the NL-only estimator
+% angle(C_RDNS) — gr-doa-style: the two channels' phase difference measured
+% from the noise-source state alone. (The leak-cancelled NS-L estimator
+% angle(C_RDNS - C_RDL) was retired 2026-07-20; the correlated NL/L
+% baseline, measured rho_DRL ~ 0.2, is now included by choice — see
+% chain_phase_runs.) Sessions come from the schema-v6 session_id sentinels
 % (lib/session_key.m): run-folder-keyed captures join their own session's
 % calib run by EXACT identity (no time limit — elapsed time is diagnostic
 % only); "legacy-flat" captures keep the historical nearest-gap-run join
@@ -48,7 +49,7 @@ function compute_L2(cfg)
 % BEFORE the incremental filter): the config/algorithm stamp
 % (BrundageSoOp_L2_chaincal_stamp.json) must match AND every existing row's
 % freshly recomputed chain association (phase + session) must equal what it
-% has stored — so config/reference changes, shifted run means, newly USABLE
+% has stored — so config/algorithm changes, shifted run means, newly USABLE
 % calibration (e.g. after the v6 migration), and repaired session_id values
 % all force a full rebuild; a rebuild also renames any sigma0 product aside
 % (_stale_*). Captures outside the elevation table's time span get theta =
@@ -105,9 +106,11 @@ function compute_L2(cfg)
     chain_tol_min = getfield_default(cfg, 'chain_join_tol_min', 60);
     R = chain_phase_runs(fullfile(cfg.out_dir, 'BrundageSoOp_calib.csv'), chain_gap_min);
     stamp_path = fullfile(cfg.out_dir, 'BrundageSoOp_L2_chaincal_stamp.json');
-    % algo_version 2 (2026-07-17): the no-reference stamp schema — v1 stamps
-    % (which carried chain_phase_ref_deg) mismatch and rebuild once.
-    stamp_now  = struct('algo_version', 2, ...
+    % algo_version 3 (2026-07-20): NL-only chain estimator (angle(C_RDNS)
+    % session mean; the leak-cancelled NS-L estimator is retired). v1/v2
+    % stamps mismatch and rebuild once — v2 products carry NS-L-derived
+    % phase_chain_deg values that must be replaced, not appended to.
+    stamp_now  = struct('algo_version', 3, ...
                         'chain_run_gap_min',  chain_gap_min, ...
                         'chain_join_tol_min', chain_tol_min, ...
                         'runs', runs_struct(R));
@@ -151,7 +154,7 @@ function compute_L2(cfg)
                ~chain_assoc_matches(prev, T, phase_chain, chain_session)
             archived = archive_name(out_csv, "_chaincal_stale_");
             movefile(out_csv, archived);
-            fprintf(['[L2] Chain-cal dependency changed (config/reference, algorithm, ' ...
+            fprintf(['[L2] Chain-cal dependency changed (config, algorithm, ' ...
                      'or the association an existing row would now get) — archived ' ...
                      'to %s; reprocessing all captures.\n'], archived);
             archive_sigma0(cfg.out_dir);
@@ -225,13 +228,13 @@ function compute_L2(cfg)
     % the corrected phase is zeroed at the calibration injection reference
     % plane using only the capture's own session. There is no reference
     % constant (chain_phase_ref_deg retired 2026-07-17; history in
-    % docs/config-reference.md#chain-cal-knobs).
+    % docs/config-reference.md#chain-cal-knobs). The chain phase itself is
+    % the NL-only angle(C_RDNS) session mean (NS-L leak-cancelled estimator
+    % retired 2026-07-20 — see chain_phase_runs).
     % FREQUENCY-FLAT ASSUMPTION (accepted 2026-07-17): one full-band, lag-zero
     % chain phase is applied to all three phase domains (sinc / fd / fd_muos).
     % Revisit via the nl_peak_lag / l_peak_lag diagnostics if a differential
-    % group delay or band-dependent chain response is ever suspected; known
-    % caveat — the notch method's state-specific NL/L RFI operators degrade the
-    % baseline cancellation (~0.5 vs ~0.1 deg season scatter), accepted.
+    % group delay or band-dependent chain response is ever suspected.
     corr_cal         = wrap180(phase_corr         - phase_chain);
     corr_cal_fd      = wrap180(phase_corr_fd      - phase_chain);
     corr_cal_fd_muos = wrap180(phase_corr_fd_muos - phase_chain);
@@ -287,12 +290,18 @@ end
 
 function R = chain_phase_runs(calib_csv, gap_min)
 % Per-run receiver-chain differential phase from the calib CSV, using the
-% correlated-baseline-cancelled estimator angle(C_RDNS - C_RDL). The NL and L
-% states share the injection path and a correlated inter-channel baseline
-% (measured rho_DRL ~ 0.2: receiver-internal common-mode leakage and/or
-% shared-load correlated noise), so the complex difference cancels that
-% baseline and isolates the noise-diode path (assumes the baseline is
-% stationary between the paired NL and L captures).
+% NL-only estimator angle(C_RDNS) — gr-doa-style (phase difference between
+% the two channels measured from the noise-source state alone, D.*conj(R)
+% sign convention). The leak-cancelled NS-L estimator angle(C_RDNS - C_RDL)
+% was retired 2026-07-20 (user decision, gr-doa parity): the correlated
+% NL/L inter-channel baseline (measured rho_DRL ~ 0.2) is now INCLUDED in
+% the estimate by choice; its magnitude/stability stays observable in the
+% 'Calib: Chain phase (NS - L)' viewer diagnostic.
+%
+% Degenerate pairs fail closed: nonfinite or nonpositive C_RDNS_amp leaves
+% the phasor direction undefined, so such pairs are excluded before the
+% reduction (n counts usable pairs); a run whose circular-mean resultant is
+% ~zero (no defined direction) returns NaN, never atan2(0,0) = 0.
 %
 % Run identity (session-keyed, 2026-07-17): pairs with a run-folder session
 % key form one run per exact key (one cryosoop folder == one UHD session);
@@ -308,8 +317,7 @@ function R = chain_phase_runs(calib_csv, gap_min)
               'VariableNames', {'key', 't', 'ph', 'n'});
     if ~isfile(calib_csv), return; end
     C = readtable(calib_csv, 'TextType', 'string');
-    need = {'timestamp', 'C_RDNS_amp', 'C_RDNS_phase_deg', ...
-            'C_RDL_amp', 'C_RDL_phase_deg'};
+    need = {'timestamp', 'C_RDNS_amp', 'C_RDNS_phase_deg'};
     if ~all(ismember(need, C.Properties.VariableNames)), return; end
     if ~ismember('session_id', C.Properties.VariableNames)
         fprintf(['[L2] WARNING(chaincal-prov): calib CSV has no session_id ' ...
@@ -335,8 +343,16 @@ function R = chain_phase_runs(calib_csv, gap_min)
     end
     C = sortrows(C(C.session_id ~= "unknown", :), 'timestamp');
     if isempty(C), return; end
-    z  = C.C_RDNS_amp .* exp(1i * deg2rad(C.C_RDNS_phase_deg)) ...
-       - C.C_RDL_amp  .* exp(1i * deg2rad(C.C_RDL_phase_deg));
+    z  = C.C_RDNS_amp .* exp(1i * deg2rad(C.C_RDNS_phase_deg));
+    ok = isfinite(z) & C.C_RDNS_amp > 0;   % fail closed: no defined direction
+    if any(~ok)
+        fprintf(['[L2] WARNING(chaincal-prov): %d calib pair(s) with ' ...
+                 'nonfinite/nonpositive C_RDNS excluded from chain cal.\n'], ...
+                sum(~ok));
+    end
+    C = C(ok, :);
+    if isempty(C), return; end
+    z  = z(ok);
     zu = z ./ max(abs(z), eps);    % unit vectors -> equal-weight circular mean
     % Keyed sessions: one run per exact key.
     km = C.session_id ~= "legacy-flat";
@@ -360,9 +376,14 @@ end
 
 
 function Rr = run_reduce(grp, zu, ts)
-% Equal-weight circular mean + mean time + pair count per run group.
+% Equal-weight circular mean + mean time + pair count per run group. A run
+% whose mean resultant is ~zero (e.g. exactly opposed pairs) has no defined
+% direction -> NaN, never atan2(0,0) = 0 masquerading as a valid phase.
     n  = accumarray(grp, 1);
-    ph = rad2deg(atan2(accumarray(grp, imag(zu)), accumarray(grp, real(zu))));
+    sy = accumarray(grp, imag(zu));
+    sx = accumarray(grp, real(zu));
+    ph = rad2deg(atan2(sy, sx));
+    ph(hypot(sx, sy) ./ max(n, 1) < 1e-9) = NaN;
     t  = datetime(accumarray(grp, posixtime(ts)) ./ n, 'ConvertFrom', 'posixtime');
     Rr = table(t, ph, n, 'VariableNames', {'t', 'ph', 'n'});
 end
@@ -463,10 +484,14 @@ function [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, out_dir)
         fprintf(['[L2] Chain-phase cal: no usable calib runs in %s — ' ...
                  'phase_chain_deg columns are NaN.\n'], out_dir);
     else
+        % Counts come from the association masks, NOT from non-NaN phases: a
+        % keyed session can match (tf) yet carry NaN by the degenerate-
+        % session policy, and deriving legacy as (non-NaN minus keyed) would
+        % then go negative.
         fprintf(['[L2] Chain-phase cal: %d keyed + %d legacy capture(s) matched ' ...
                  'across %d calib runs; %d keyed unmatched, %d unknown provenance ' ...
-                 '(NaN). Full per-session subtraction.\n'], sum(tf), ...
-                sum(~isnan(phase_chain)) - sum(tf), height(R), ...
+                 '(NaN). NL-only chain phase, full per-session subtraction.\n'], sum(tf), ...
+                sum(is_legacy_sig & chain_session ~= ""), height(R), ...
                 sum(is_keyed_sig & ~tf), sum(sig_sid == "unknown"));
     end
 end
@@ -474,9 +499,10 @@ end
 
 function ok = chain_stamp_config_matches(stamp_path, stamp_now)
 % True only if the stored dependency stamp exists, parses, and agrees on the
-% algorithm version + chain config. algo_version 2 is the no-reference stamp
-% schema (2026-07-17): v1 stamps carried chain_phase_ref_deg and mismatch
-% here, forcing the correct one-time rebuild. Calibration-content and
+% algorithm version + chain config. algo_version 3 is the NL-only-estimator
+% schema (2026-07-20); v2 (no-reference, NS-L estimator, 2026-07-17) and v1
+% (chain_phase_ref_deg) stamps both mismatch here, forcing the correct
+% one-time rebuild that replaces NS-L-derived values. Calibration-content and
 % provenance changes are caught separately by chain_assoc_matches, which
 % compares every existing row's freshly recomputed association directly (a
 % run-table proxy comparison proved unsafe: it could not see newly USABLE

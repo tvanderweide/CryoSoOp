@@ -84,8 +84,8 @@ function soop_viewer_render_calib(V, kind)
             end
             plot_series(ax, t, chain_phase_col(T), agg, 'phase');
             ylabel(ax, 'Chain phase (deg)');
-            title(ax, ['Receiver chain phase: angle(C\_RDNS - C\_RDL), ' ...
-                       'leak-cancelled']);
+            title(ax, ['Leak-cancelled chain phase: angle(C\_RDNS - C\_RDL) ' ...
+                       '— diagnostic (applied cal uses angle(C\_RDNS) only)']);
         case 'Calib: rho_NS phase + expected noise (C_RDNS)'
             need = {'C_RDNS_phase_deg', 'rho_DRNS'};
             if ~all(ismember(need, T.Properties.VariableNames))

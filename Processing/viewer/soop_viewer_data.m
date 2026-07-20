@@ -119,9 +119,10 @@ function [dlt, ok, why] = chaincal_delta(V, TT)
     wrap_deg = V.U.wrap_deg;
     % Per-row chain-phase correction wrap180(phase_corr_cal_deg -
     % phase_corr_deg) from the active product dir's L2 CSV, joined to TT by
-    % base_name (== -phase_chain_deg, full per-session subtraction — the
-    % sign the L2 runtime applies; identical for all phase domains, so one
-    % delta serves sinc/fd/muos columns).
+    % base_name (== -phase_chain_deg: the NL-only angle(C_RDNS) session
+    % mean since 2026-07-20, subtracted in full — the sign the L2 runtime
+    % applies; identical for all phase domains, so one delta serves
+    % sinc/fd/muos columns).
     % Rows without an L2 match or with NaN chain phase get NaN (dropped
     % from the plot rather than silently left uncorrected). ok=false with a
     % message when the L2 CSV predates the chain-cal schema.
@@ -143,11 +144,10 @@ end
 
 function ph = chain_phase_col(Tin)
     % Per-pair leak-cancelled receiver chain phase angle(C_RDNS - C_RDL),
-    % degrees. The NL and L states share the injection path and the
-    % receiver-internal common-mode leak, so the complex difference cancels
-    % the leak (and the small common-load term), isolating the noise-diode
-    % path. Mirrors chain_phase_runs() in compute_L2.m (per-pair here; the
-    % L2 correction reduces pairs to per-run circular means).
+    % degrees — DIAGNOSTIC only since 2026-07-20: the applied L2 correction
+    % is the NL-only angle(C_RDNS) session mean (chain_phase_runs in
+    % compute_L2.m); this leak-cancelled series remains so the accepted
+    % leak term stays observable (compare against C_RDNS_phase_deg).
     z = Tin.C_RDNS_amp .* exp(1i * deg2rad(Tin.C_RDNS_phase_deg)) ...
       - Tin.C_RDL_amp  .* exp(1i * deg2rad(Tin.C_RDL_phase_deg));
     ph = rad2deg(angle(z));

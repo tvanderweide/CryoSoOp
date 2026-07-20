@@ -1,10 +1,12 @@
-function tests = chain_session_test
+function tests = chain_session_test  %#ok<*NASGU> cfg fixtures are consumed inside evalc('compute_L2(cfg);') — invisible to the analyzer
 % Session-keyed chain-phase calibration tests (schema v6, 2026-07-17):
 % lib/session_key.m sentinels; compute_L1 / compute_calib session_id columns
 % and in-place v6 migration; compute_L2's exact-identity chain join,
-% chain_session provenance column, full per-session subtraction (ref = 0),
-% and the chain-cal dependency stamp (rebuild on reference / calibration
-% changes, sigma0 invalidation).
+% chain_session provenance column, the NL-only chain estimator
+% angle(C_RDNS) with full per-session subtraction (NS-L leak-cancelled
+% estimator retired 2026-07-20), and the chain-cal dependency stamp
+% (algo_version 3; rebuild on algorithm / calibration changes, sigma0
+% invalidation).
 %
 % Stage tests run the production stages on tiny synthetic fixtures (real
 % int16 captures for L1/calib, CSV-only fixtures for L2 — the chain join
@@ -409,11 +411,12 @@ function test_l2_schema_upgrade_rebuild(tc)
 end
 
 
-function test_l2_stamp_v1_to_v2_migration(tc)
+function test_l2_stamp_v1_to_v3_migration(tc)
 % v1 stamps carried chain_phase_ref_deg (retired 2026-07-17). Any v1 stamp —
-% regardless of its stored reference value — must mismatch the v2 config
-% check and force exactly one full rebuild; afterwards the rewritten stamp
-% is v2 with no reference field, and appends resume normally.
+% regardless of its stored reference value — must mismatch the current (v3)
+% config check and force exactly one full rebuild, reaching v3 directly (no
+% intermediate v2 pass); afterwards the rewritten stamp is v3 with no
+% reference field, and appends resume normally.
     d  = l2_dir(tc);
     t0 = datetime(2026, 1, 2, 10, 0, 0);
     cal = cal_rows(t0, 30, "20260102/100000");
@@ -442,10 +445,10 @@ function test_l2_stamp_v1_to_v2_migration(tc)
         verifyEqual(tc, dlt, -L2.phase_chain_deg, 'AbsTol', 1e-9);
     end
     st2 = jsondecode(fileread(sp));
-    verifyEqual(tc, st2.algo_version, 2);
+    verifyEqual(tc, st2.algo_version, 3);
     verifyFalse(tc, isfield(st2, 'chain_phase_ref_deg'));
 
-    % Appends resume under the rewritten v2 stamp: one new capture, no new
+    % Appends resume under the rewritten v3 stamp: one new capture, no new
     % archive, full subtraction on every row.
     sig2 = [sig; sig_rows(t0 + minutes(3), "20260102/100000")];
     write_csv_ts(fullfile(d, 'BrundageSoOp_L1_sig.csv'), sig2);
@@ -459,6 +462,194 @@ function test_l2_stamp_v1_to_v2_migration(tc)
         dlt = wrap180_local(L2.(c{1}) - L2.(c{2}));
         verifyEqual(tc, dlt, -L2.phase_chain_deg, 'AbsTol', 1e-9);
     end
+end
+
+function test_l2_chain_nl_only_estimator(tc)
+% The discriminating fixture for the 2026-07-20 estimator change: with a
+% nonzero C_RDL leak term the retired NS-L estimator would give
+% angle(e^{i30} - 0.5 e^{i120}) (~3.4 deg) while the applied NL-only
+% estimator must give exactly the C_RDNS phase (30 deg) — in
+% phase_chain_deg AND all three calibrated phase domains.
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    cal = cal_rows_leak(t0, 30, 1, 0.5, 120, "20260102/100000");
+    sig = sig_rows(t0 + minutes(2), "20260102/100000");
+    cfg = l2_fixture(d, sig, cal, t0);
+    evalc('compute_L2(cfg);');
+    L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
+    verifyEqual(tc, L2.phase_chain_deg, 30, 'AbsTol', 1e-9);
+    nsl = rad2deg(angle(exp(1i*deg2rad(30)) - 0.5*exp(1i*deg2rad(120))));
+    verifyGreaterThan(tc, abs(wrap180_local(30 - nsl)), 5, ...
+        'fixture must discriminate the two estimators');
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        dlt = wrap180_local(L2.(c{1}) - L2.(c{2}));
+        verifyEqual(tc, dlt, -30, 'AbsTol', 1e-9);
+    end
+end
+
+function test_l2_chain_no_crdl_columns(tc)
+% The NL-only estimator must not require the C_RDL columns at all: a calib
+% CSV without them still chain-calibrates.
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    cal = removevars(cal_rows(t0, 25, "20260102/100000"), ...
+                     {'C_RDL_amp', 'C_RDL_phase_deg'});
+    sig = sig_rows(t0 + minutes(2), "20260102/100000");
+    cfg = l2_fixture(d, sig, cal, t0);
+    evalc('compute_L2(cfg);');
+    L2 = readtable(fullfile(d, 'BrundageSoOp_L2.csv'), 'TextType', 'string');
+    verifyEqual(tc, L2.phase_chain_deg, 25, 'AbsTol', 1e-9);
+    verifyEqual(tc, wrap180_local(L2.phase_corr_cal_deg - L2.phase_corr_deg), ...
+                -25, 'AbsTol', 1e-9);
+end
+
+function test_l2_chain_equal_weight_and_wrap(tc)
+% (a) Equal-weight reduction: session A pairs at 0 deg (amp 1) and 90 deg
+% (amp 100) must average to 45 deg — amplitude weighting would give ~90.
+% (b) Wrap edge: session B pairs at +179/-179 deg average to 180 deg, and
+% the applied (wrapped) delta stays consistent.
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    kA = "20260102/100000";  kB = "20260102/110000";
+    cal = [cal_rows_leak([t0; t0 + minutes(1)], [0; 90], [1; 100], 0, 0, [kA; kA]); ...
+           cal_rows([t0 + minutes(60); t0 + minutes(61)], [179; -179], [kB; kB])];
+    sig = sig_rows([t0 + minutes(2); t0 + minutes(62)], [kA; kB]);
+    cfg = l2_fixture(d, sig, cal, t0);
+    evalc('compute_L2(cfg);');
+    L2 = sortrows(readtable(fullfile(d, 'BrundageSoOp_L2.csv'), ...
+                            'TextType', 'string'), 'timestamp');
+    verifyEqual(tc, L2.phase_chain_deg(1), 45, 'AbsTol', 1e-9);
+    verifyEqual(tc, wrap180_local(L2.phase_chain_deg(2) - 180), 0, 'AbsTol', 1e-9);
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        dlt = wrap180_local(L2.(c{1}) - L2.(c{2}));
+        verifyEqual(tc, wrap180_local(dlt + L2.phase_chain_deg), [0; 0], ...
+                    'AbsTol', 1e-9);
+    end
+end
+
+function test_l2_chain_degenerate_policy(tc)
+% Fail-closed policy (2026-07-20): (a) nonfinite/zero-amplitude pairs are
+% excluded, so a session with no usable pair joins as NaN; (b) exactly
+% opposed pairs leave a ~zero circular-mean resultant — NaN, never
+% atan2(0,0) = 0 masquerading as a valid phase. A healthy control session
+% still calibrates.
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    kA = "20260102/100000";  kB = "20260102/110000";  kC = "20260102/120000";
+    cal = [cal_rows_leak([t0; t0 + minutes(1)], [10; NaN], [0; 1], 0, 0, [kA; kA]); ...  % amp 0 + NaN phase
+           cal_rows([t0 + minutes(60); t0 + minutes(61)], [0; 180], [kB; kB]); ...       % opposed pair
+           cal_rows(t0 + minutes(120), 30, kC)];                                         % healthy control
+    sig = sig_rows([t0 + minutes(2); t0 + minutes(62); t0 + minutes(122)], ...
+                   [kA; kB; kC]);
+    cfg = l2_fixture(d, sig, cal, t0);
+    out = evalc('compute_L2(cfg);');
+    % The summary must never report a negative association count — a keyed
+    % session that matches but carries NaN (this fixture's session B) used
+    % to understate the legacy count below zero.
+    verifyEmpty(tc, regexp(out, '-\d+ (keyed|legacy)', 'once'), ...
+                'negative association count in the chain-cal summary');
+    L2 = sortrows(readtable(fullfile(d, 'BrundageSoOp_L2.csv'), ...
+                            'TextType', 'string'), 'timestamp');
+    verifyTrue(tc, isnan(L2.phase_chain_deg(1)), 'no-usable-pair session');
+    verifyTrue(tc, isnan(L2.phase_corr_cal_deg(1)));
+    verifyTrue(tc, isnan(L2.phase_chain_deg(2)), 'zero-resultant session');
+    verifyTrue(tc, isnan(L2.phase_corr_cal_deg(2)));
+    verifyEqual(tc, L2.phase_chain_deg(3), 30, 'AbsTol', 1e-9);
+    verifyEqual(tc, wrap180_local(L2.phase_corr_cal_deg(3) - L2.phase_corr_deg(3)), ...
+                -30, 'AbsTol', 1e-9);
+end
+
+function test_l2_stamp_v2_to_v3_stale_content(tc)
+% A v2-era product dir carries NS-L-derived chain values. The v3 code must
+% replace that stale numerical content via exactly one rebuild — archiving
+% the L2 CSV and any sigma0 product once — and a subsequent append must not
+% archive again. (The fixture's leak term makes NS-L and NL-only values
+% visibly different, so this proves content replacement, not just the
+% version gate.)
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    cal = cal_rows_leak(t0, 30, 1, 0.5, 120, "20260102/100000");
+    sig = sig_rows(t0 + minutes(2), "20260102/100000");
+    cfg = l2_fixture(d, sig, cal, t0);
+    evalc('compute_L2(cfg);');
+    out_csv = fullfile(d, 'BrundageSoOp_L2.csv');
+    sp      = fullfile(d, 'BrundageSoOp_L2_chaincal_stamp.json');
+
+    % Regress the dir to v2: overwrite the chain columns with the NS-L
+    % values and downgrade the stamp; drop in a sigma0 product to archive.
+    nsl = rad2deg(angle(exp(1i*deg2rad(30)) - 0.5*exp(1i*deg2rad(120))));
+    L2  = readtable(out_csv, 'TextType', 'string');
+    L2.phase_chain_deg(:) = nsl;
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        L2.(c{1}) = wrap180_local(L2.(c{2}) - nsl);
+    end
+    write_csv_ts(out_csv, L2);
+    st = jsondecode(fileread(sp));
+    st.algo_version = 2;
+    fid = fopen(sp, 'w');  fwrite(fid, jsonencode(st));  fclose(fid);
+    writetable(table(1, 'VariableNames', {'placeholder'}), ...
+               fullfile(d, 'BrundageSoOp_sigma0.csv'));
+
+    evalc('compute_L2(cfg);');
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv'))), 1);
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_sigma0_stale_*.csv'))), 1);
+    verifyFalse(tc, isfile(fullfile(d, 'BrundageSoOp_sigma0.csv')));
+    L2b = readtable(out_csv, 'TextType', 'string');
+    verifyEqual(tc, L2b.phase_chain_deg, 30, 'AbsTol', 1e-9);
+    for c = {'phase_corr_cal_deg',        'phase_corr_deg';
+             'phase_corr_cal_fd_deg',     'phase_corr_fd_deg';
+             'phase_corr_cal_fd_muos_deg','phase_corr_fd_muos_deg'}'
+        dlt = wrap180_local(L2b.(c{1}) - L2b.(c{2}));
+        verifyEqual(tc, dlt, -30, 'AbsTol', 1e-9);
+    end
+    st3 = jsondecode(fileread(sp));
+    verifyEqual(tc, st3.algo_version, 3);
+
+    % Append under the v3 stamp: no second archive of either product.
+    sig2 = [sig; sig_rows(t0 + minutes(3), "20260102/100000")];
+    write_csv_ts(fullfile(d, 'BrundageSoOp_L1_sig.csv'), sig2);
+    evalc('compute_L2(cfg);');
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv'))), 1);
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_sigma0_stale_*.csv'))), 1);
+    verifyEqual(tc, height(readtable(out_csv)), 2);
+end
+
+function test_l2_stamp_v2_version_gate_only(tc)
+% Isolates the VERSION gate for v2 (the stale-content test above also trips
+% the association gate): stored values and associations already equal what
+% v3 computes (C_RDL = 0 makes NS-L == NL-only), the stamp alone says v2 —
+% the dir must still archive + rebuild exactly once, purely because
+% algo_version == 2, then append cleanly under the rewritten v3 stamp.
+    d  = l2_dir(tc);
+    t0 = datetime(2026, 1, 2, 10, 0, 0);
+    cal = cal_rows(t0, 30, "20260102/100000");
+    sig = sig_rows(t0 + minutes(2), "20260102/100000");
+    cfg = l2_fixture(d, sig, cal, t0);
+    evalc('compute_L2(cfg);');
+    sp = fullfile(d, 'BrundageSoOp_L2_chaincal_stamp.json');
+    st = jsondecode(fileread(sp));
+    st.algo_version = 2;
+    fid = fopen(sp, 'w');  fwrite(fid, jsonencode(st));  fclose(fid);
+
+    evalc('compute_L2(cfg);');
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv'))), 1);
+    st3 = jsondecode(fileread(sp));
+    verifyEqual(tc, st3.algo_version, 3);
+    out_csv = fullfile(d, 'BrundageSoOp_L2.csv');
+    L2 = readtable(out_csv, 'TextType', 'string');
+    verifyEqual(tc, L2.phase_chain_deg, 30, 'AbsTol', 1e-9);
+
+    sig2 = [sig; sig_rows(t0 + minutes(3), "20260102/100000")];
+    write_csv_ts(fullfile(d, 'BrundageSoOp_L1_sig.csv'), sig2);
+    evalc('compute_L2(cfg);');
+    verifyEqual(tc, numel(dir(fullfile(d, 'BrundageSoOp_L2_chaincal_stale_*.csv'))), 1);
+    verifyEqual(tc, height(readtable(out_csv)), 2);
 end
 
 
@@ -534,11 +725,24 @@ function T = sig_rows(ts, sids)
 end
 
 function T = cal_rows(ts, ph_deg, sids)
-% Calib rows whose chain estimator angle(C_RDNS - C_RDL) is exactly ph_deg
-% (C_RDL amplitude 0 -> z = exp(1i*ph)).
+% Calib rows whose NL-only chain estimator angle(C_RDNS) is exactly ph_deg.
+% C_RDL columns are kept (at 0) for CSV realism; the estimator ignores them
+% (NS-L retired 2026-07-20).
     ts = ts(:);  ph = ph_deg(:);  n = numel(ts);
     T = table(ts, ones(n, 1), ph, zeros(n, 1), zeros(n, 1), zeros(n, 1), ...
               string(sids(:)), ...
+              'VariableNames', {'timestamp', 'C_RDNS_amp', 'C_RDNS_phase_deg', ...
+              'C_RDL_amp', 'C_RDL_phase_deg', 'overflow_flag', 'session_id'});
+end
+
+function T = cal_rows_leak(ts, ph_ns_deg, amp_ns, amp_l, ph_l_deg, sids)
+% Calib rows with explicit C_RDNS amplitude and a (possibly nonzero) C_RDL
+% "leak" term — the discriminating fixture family for the 2026-07-20
+% NL-only change. Scalar args broadcast; vectors are per-row.
+    ts = ts(:);  n = numel(ts);
+    ex = @(v) v(:) .* ones(n, 1);
+    T = table(ts, ex(amp_ns), ex(ph_ns_deg), ex(amp_l), ex(ph_l_deg), ...
+              zeros(n, 1), string(sids(:)), ...
               'VariableNames', {'timestamp', 'C_RDNS_amp', 'C_RDNS_phase_deg', ...
               'C_RDL_amp', 'C_RDL_phase_deg', 'overflow_flag', 'session_id'});
 end
