@@ -194,6 +194,8 @@ function compute_L2(cfg)
     T = T(ok, :);
     theta = theta(ok);
     az = az(ok);
+    phase_chain = phase_chain(ok);
+    chain_session = chain_session(ok);
     if isempty(T)
         fprintf('[L2] No captures within the elevation table span.\n');
         return;
