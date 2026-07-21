@@ -27,11 +27,9 @@ function compare_sat_candidates(cfg)
 %                                    full band + MUOS sub-bands), plus
 %                                    phase_raw_fd_deg / phase_raw_fd_muos_deg.
 %
-% Note: cfg.capture_tz names the capture-stamp timebase; elevation tables
-% are UTC. Legacy 2025-26 data used the Pi's LOCAL clock ('America/Boise',
-% verified via timedatectl 2026-06-12; conversion handles MST/MDT incl.
-% the March DST change). UTC-era cryosoop data uses capture_tz "UTC"
-% (identity). If cfg.capture_tz is absent, timestamps are assumed UTC.
+% cfg.capture_tz names the capture-stamp timebase; elevation tables are UTC.
+% Zone conversion handles daylight-saving transitions. If capture_tz is absent
+% or "UTC", timestamps pass through unchanged.
 %
 
     if ~isfield(cfg, 'snr_threshold'), cfg.snr_threshold = 10; end
@@ -41,8 +39,7 @@ function compare_sat_candidates(cfg)
         fprintf('[sat-id] %s not found — run compute_L1 first.\n', sig_csv);
         return;
     end
-    % Elevation tables are a stable season input in cfg.elev_dir (decoupled from
-    % the per-run out_dir); fall back to out_dir for back-compatibility.
+    % Elevation tables live in cfg.elev_dir; cfg.out_dir is the fallback.
     if isfield(cfg, 'elev_dir') && ~isempty(cfg.elev_dir)
         elev_dir = cfg.elev_dir;
     else
@@ -69,8 +66,8 @@ function compare_sat_candidates(cfg)
     k_phase  = (4*pi * cfg.tower_h_m / lambda_m) * (180/pi);  % deg per unit sin(theta)
 
     % Frequency-domain L1 phase (full band + MUOS sub-bands), scored with the
-    % same geometric correction. NaN if compute_L1 has not written the fd
-    % columns yet (re-run compute_L1 for the frequency-domain phase).
+    % same geometric correction. Missing fd columns produce NaN; run compute_L1
+    % to populate them.
     has_fd   = ismember('peak_phase_deg_fd',      T.Properties.VariableNames);
     has_muos = ismember('peak_phase_deg_fd_muos', T.Properties.VariableNames);
     if has_fd,   ph_fd   = T.peak_phase_deg_fd;      else, ph_fd   = nan(height(T), 1); end
@@ -196,10 +193,8 @@ end
 
 function t_utc = to_utc(t, cfg)
 % Convert naive capture timestamps (cfg.capture_tz timebase) to naive UTC.
-% Declaring the zone keeps the clock face; switching to UTC converts the
-% instant (MST/MDT and the March DST change handled automatically for
-% legacy local-clock seasons; exact identity when capture_tz is 'UTC',
-% the setting for UTC-stamped cryosoop data).
+% Declaring the source zone keeps its clock face; switching to UTC converts the
+% instant and handles daylight-saving transitions. UTC is an identity mapping.
     if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz)
         t.TimeZone = cfg.capture_tz;
         t.TimeZone = 'UTC';

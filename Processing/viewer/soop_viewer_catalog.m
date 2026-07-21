@@ -1,16 +1,14 @@
 function [PLOT_INFO, CAP_PATTERNS] = soop_viewer_catalog(cfg)
 % Plot catalog for BrundageSoOp_viewer: PLOT_INFO (name / uses_agg / uses_cap /
 % side-panel text / fcn / math) plus CAP_PATTERNS. Closures capture cfg.wx_dat,
-% so the builder takes cfg. The PLOT_MATH table (math + source strings) is
-% merged into PLOT_INFO exactly as in the original viewer.
+% so the builder takes cfg. PLOT_MATH supplies each plot's math and source text.
     P = @(name, uses_agg, uses_cap, expl) ...
         struct('name', name, 'uses_agg', uses_agg, 'uses_cap', uses_cap, ...
                'expl', expl, 'fcn', "", 'math', "");
     wx_path = '';
     if isfield(cfg, 'wx_dat'), wx_path = cfg.wx_dat; end
-    % Shared explanation for the three satellite-candidate views. These now
-    % carry the optional weather overlay (formerly the separate "L2: + SNOdar"
-    % views): snow depth + the two station temperatures, each behind a checkbox.
+    % Shared explanation for the three satellite-candidate views, including
+    % optional snow-depth, SWE, and station-temperature overlays.
     cand_expl = @(what) ['A satellite-candidate view from ' ...
         'sat_candidates_corrected.csv (compare_sat_candidates): this entry ' ...
         'shows ' what '.' newline newline 'Only captures above the scoring ' ...

@@ -1,8 +1,8 @@
 function compute_L1(cfg)
-% Compute L1 cross-correlation products from UHF signal capture pairs.
-% MATLAB translation of Chan3ProcAll_boise_multi.py — incremental (appends
-% only pairs missing from the output CSVs), batched CSV appends (every
-% cfg.batch_size pairs), GPU path (serial, gpuArray FFTs) or CPU path (parfor).
+% Compute L1 cross-correlation products from paired UHF signal captures.
+% Appends new pairs in batches and writes one product set per RFI method.
+% Uses serial gpuArray FFTs or CPU parfor according to cfg.use_gpu.
+% Cross-correlations use D.*conj(R): direct = ch0, reflected = ch1.
 %
 % Input: UHF_YYYYMMDDHHMMSS_ch0.dat (direct) / _ch1.dat (reflected), each
 % one channel of interleaved I/Q int16 (160 MB per 2 s capture at 20 MS/s);
@@ -14,10 +14,9 @@ function compute_L1(cfg)
 % peak_phase_deg, snr_db, noise_floor, segments_processed, file_size_bytes,
 % overflow_flag, peak_amplitude_fd, peak_phase_deg_fd, peak_amplitude_fd_muos,
 % peak_phase_deg_fd_muos, pow_ch0_fd, pow_ch0_fd_muos, pow_ch1_fd,
-% pow_ch1_fd_muos, session_id (v6, 2026-07-17: UHD-session sentinel —
-% "<YYYYMMDD>/<HHMMSS>" run-folder key, "legacy-flat", or "unknown"; existing
-% CSVs are patched in place from a metadata-only disk scan, no reprocessing —
-% see lib/session_key.m and compute_L2's chain-cal join).
+% pow_ch1_fd_muos, session_id. session_id is a validated
+% "<YYYYMMDD>/<HHMMSS>" run-folder key, "legacy-flat", or "unknown"; see
+% lib/session_key.m and compute_L2's chain-cal join.
 %   - meas_peak_lag: MEASURED discrete argmax of |R_xy| over +-lag_half_win
 %     (diagnostic only — the observable is always extracted at cfg.peak_lag).
 %   - peak_amplitude_fd/peak_phase_deg_fd: cross-spectrum evaluated at
@@ -35,26 +34,15 @@ function compute_L1(cfg)
 %     warning logged if the file is absent/missing. compute_L2 excludes
 %     overflow_flag==1 rows from the phase time series.
 %
-% Schema migration (behavior unchanged numerically): a sig CSV missing
-% peak_phase_deg_fd OR any of the four channel-power columns (pow_ch0_fd,
-% pow_ch0_fd_muos, pow_ch1_fd, pow_ch1_fd_muos — a partial set counts as
-% missing) is archived (collision-safe yyyyMMdd_HHmmss suffix) and the season
-% reprocessed: existing columns are recomputed byte-identically and the missing
-% columns added (the FFT-derived columns can't be back-patched); a sig CSV
-% missing overflow_flag is patched in place from cfg.overflow_file, no
-% reprocessing.
-%
 % cfg fields consumed: data_dir, out_dir, fs, Ti, num_segs, peak_lag,
 % lag_half_win, min_bytes, batch_size (default 200), use_gpu, overflow_file,
 % rfi_methods (default {'none'}), rfi_bands, muos_bands.
 %
 
-    % --- Find ch0/ch1 pairs (mirrors Python find_file_pairs) ---
+    % --- Find signal ch0/ch1 pairs ---
     % 'UHF_2' matches signal files (UHF_2025..., UHF_2026...) but not the
-    % calibration prefixes UHF__NL_ / UHF__L_ (double underscore). The '**'
-    % recurses into the cryosoop <YYYYMMDD>/<HHMMSS>/ per-run subfolders while
-    % still matching a legacy flat directory (** matches zero folder levels);
-    % each partner path is built from the hit's .folder (process_pair).
+    % calibration prefixes UHF__NL_ / UHF__L_. '**' covers both run folders
+    % and captures stored directly in cfg.data_dir.
     ch0_files = dir(fullfile(cfg.data_dir, '**', 'UHF_2*_ch0.dat'));
     if isempty(ch0_files)
         fprintf('[L1] No UHF_*_ch0.dat files found in %s\n', cfg.data_dir);
@@ -62,12 +50,9 @@ function compute_L1(cfg)
     end
     base_names = string(erase({ch0_files.name}', '_ch0.dat'));
 
-    % --- Timezone-provenance guard (first, before any setup side effects) ---
-    % UTC-era cryosoop runs record "wall_clock": "UTC" in their per-run
-    % summary.json (legacy runs lack the field). Processing such runs with a
-    % local-zone cfg.capture_tz would silently shift every satellite-geometry
-    % product by the UTC offset, so refuse outright. capture_tz absent or
-    % 'UTC' is consistent with UTC stamps — no scan needed.
+    % --- Validate capture timestamp provenance before setup side effects ---
+    % summary.json wall_clock="UTC" requires cfg.capture_tz="UTC"; otherwise
+    % satellite geometry would be shifted by the configured UTC offset.
     if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz) && ~strcmpi(cfg.capture_tz, 'UTC')
         run_dirs = unique(string({ch0_files.folder}'));
         for rd = run_dirs(:)'
@@ -76,7 +61,7 @@ function compute_L1(cfg)
             try
                 s = jsondecode(fileread(sj));
             catch
-                continue;   % unreadable summary — not a provenance signal
+                continue;   % An unreadable summary does not establish a timebase.
             end
             if isfield(s, 'wall_clock') && strcmpi(string(s.wall_clock), 'UTC')
                 error('BrundageSoOp:captureTzMismatch', ...
@@ -89,11 +74,10 @@ function compute_L1(cfg)
         end
     end
 
-    % --- Session identity (schema v6): one cryosoop run folder == one UHD
-    %     session. Sentinel per capture (lib/session_key.m): the validated
-    %     "<YYYYMMDD>/<HHMMSS>" key, "legacy-flat" (data-root capture), or
-    %     "unknown" (fails closed in compute_L2's chain-cal join). Duplicate
-    %     base names in different session folders are ambiguous -> "unknown". ---
+    % --- Assign UHD session identity ---
+    % Run-folder captures use a validated "<YYYYMMDD>/<HHMMSS>" key; captures
+    % at the data root use "legacy-flat". Ambiguous bases use "unknown" and
+    % fail closed in the L2 chain-calibration join.
     dr        = dir(cfg.data_dir);
     root_fold = string(dr(1).folder);          % data_dir as dir() spells it
     file_sids = arrayfun(@(h) session_key(h.folder, root_fold), ch0_files);
@@ -104,11 +88,9 @@ function compute_L1(cfg)
                  '"unknown" (excluded from chain cal).\n'], n_ambig);
     end
 
-    % --- RFI excision methods + per-method output directories ---
-    % Each method writes a self-contained product set so every downstream stage
-    % runs unchanged per dir: 'none' -> cfg.out_dir (v3 path), 'notch_interp' ->
-    % <out_dir>_notch. A single read/FFT per pair feeds all selected methods
-    % (see process_pair). {'none'} reproduces the original single-output behavior.
+    % --- Configure RFI methods and output directories ---
+    % Each method writes a self-contained product set. A single read/FFT per
+    % pair feeds all selected methods; 'none' writes to cfg.out_dir.
     methods = cellstr(getfield_default(cfg, 'rfi_methods', {'none'}));
     E_rfi   = rfi_excise();
     if cfg.use_gpu && any(~strcmp(methods, 'none'))
@@ -141,12 +123,9 @@ function compute_L1(cfg)
         end
     end
 
-    % --- Archive + reprocess any L1 sig CSV missing FFT-derived columns ---
-    % The freq-domain phase (peak_*_fd) and channel-power (pow_ch*_fd) columns
-    % both need per-segment FFTs and can't be back-patched, so a CSV missing the
-    % fd phase OR any of the four channel-power columns (a partial set included)
-    % is archived and the season reprocessed. Archive names carry a full
-    % yyyyMMdd_HHmmss stamp so repeated migrations never collide.
+    % --- Rebuild outputs missing FFT-derived columns ---
+    % Frequency-domain phase and channel-power fields require the raw FFTs;
+    % archive any incomplete output before recomputing it.
     pow_cols = {'pow_ch0_fd', 'pow_ch0_fd_muos', 'pow_ch1_fd', 'pow_ch1_fd_muos'};
     for mi = 1:nM
         os = out_sig{mi};
@@ -169,8 +148,7 @@ function compute_L1(cfg)
         end
     end
 
-    % --- Incremental update: skip bases already processed OR rejected ---
-    % Per-method incremental.
+    % --- Select pairs missing from each method's accepted and rejected CSVs ---
     done = cell(nM, 1);
     for mi = 1:nM
         d = strings(0, 1);
@@ -190,8 +168,7 @@ function compute_L1(cfg)
         done{mi} = d;
     end
 
-    % --- Patch existing L1 CSV(s) if overflow_flag column is missing ---
-    % Fast CSV-only patch — no signal reprocessing needed.
+    % --- Add overflow_flag to append-incompatible CSVs from capture metadata ---
     for mi = 1:nM
         os = out_sig{mi};
         if ~isfile(os), continue; end
@@ -215,13 +192,9 @@ function compute_L1(cfg)
         end
     end
 
-    % --- Patch existing L1 CSV(s) if session_id column is missing (v6) ---
-    % Schema v6 = previous schema + session_id, a CSV-only logical migration
-    % (no signal reprocessing): map each row's base_name to its on-disk
-    % session sentinel. Rows whose captures are no longer on disk or map
-    % ambiguously become "unknown" (excluded from chain cal downstream —
-    % fail closed). Atomic: temp file + rename. A patch failure is a HARD
-    % ERROR: appending v6 rows to an unmigrated CSV would misalign columns.
+    % --- Add session_id to append-incompatible CSVs from capture metadata ---
+    % Missing or ambiguous captures map to "unknown" and fail closed in L2.
+    % Replace atomically; a failed patch must stop before rows are appended.
     for mi = 1:nM
         os = out_sig{mi};
         if ~isfile(os), continue; end
@@ -230,9 +203,9 @@ function compute_L1(cfg)
             if ~ismember('session_id', existing.Properties.VariableNames)
                 sid = sid_of(existing.base_name, map_b, map_s);
                 existing.session_id = sid;
-                tmp = strrep(os, '.csv', '_patch_tmp.csv');   % writetable needs a .csv extension
+                tmp = strrep(os, '.csv', '_patch_tmp.csv');   % writetable requires a .csv extension
                 writetable(existing, tmp);
-                chk = readtable(tmp, 'TextType', 'string');   % validate before replacing
+                chk = readtable(tmp, 'TextType', 'string');   % Validate before replacing the source.
                 assert(height(chk) == height(existing) && ...
                        isequal(chk.Properties.VariableNames, existing.Properties.VariableNames), ...
                        'row/column mismatch after patch write');
@@ -266,16 +239,16 @@ function compute_L1(cfg)
         if ~isfolder(dm), mkdir(dm); end
     end
 
-    % --- Precompute window (shared by all pairs) ---
+    % --- Precompute the shared correlation window ---
     npts = floor(cfg.fs * cfg.Ti);  % samples per segment, e.g. 18,000,000
     n    = (0:npts-1)';
-    win  = 0.5 * (1 - cos(2*pi*n / (npts-1)));  % Hanning, matches numpy.hanning(N)
+    win  = 0.5 * (1 - cos(2*pi*n / (npts-1)));  % Hann window
 
-    % --- RFI excision operators (built once for this FFT length) ---
+    % --- Build RFI operators once for this FFT length ---
     excis     = E_rfi.prepare(cfg, npts);
     apply_rfi = E_rfi.apply;   % handle broadcast to workers
 
-    % --- Frequency-domain phase: delay ramp + MUOS-band mask (built once) ---
+    % --- Build the delay ramp and MUOS-band mask ---
     % The phase observable is read straight from the averaged cross-spectrum S as
     %   c = sum(S .* ramp) / npts^2  == R_xy(cfg.peak_lag)  (exact; no ifft/sinc).
     % nu is the signed normalized frequency (cyc/sample) of each UNSHIFTED fft bin
@@ -293,8 +266,8 @@ function compute_L1(cfg)
 
     if ~isfield(cfg, 'batch_size'), cfg.batch_size = 200; end
 
-    % --- Batched processing: append CSVs after each batch so an interrupted
-    %     run loses at most one batch of work. ---
+    % --- Process and append batches ---
+    % An interrupted run loses at most the active batch.
     n_new     = numel(new_idx);
     n_batches = ceil(n_new / cfg.batch_size);
     t_start   = tic;
@@ -340,7 +313,7 @@ end
 
 % =========================================================================
 function append_rows(csv_path, row_cells)
-% Append non-empty result structs to a CSV (header written on first create).
+% Append non-empty result structs, writing the header when the CSV is created.
     valid = row_cells(~cellfun(@isempty, row_cells));
     if isempty(valid), return; end
     T = struct2table(vertcat(valid{:}));
@@ -354,13 +327,9 @@ end
 
 % =========================================================================
 function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overflow_set, methods, apply_rfi, excis, ramp, muos_mask)
-% Process one ch0/ch1 pair: read both channels once, then for EACH RFI method
-% form the cross-correlation and extract amplitude/phase/SNR at cfg.peak_lag.
-% Returns rows = 1xnumel(methods) cell (one L1 row struct per method, in the
-% same order as methods) or all-empty if the pair is rejected; rej is the
-% shared rejection struct. overflow_set: base names with known UHD overflows.
-% ramp/muos_mask: precomputed delay phase ramp (full band) and MUOS-band mask
-% for the frequency-domain phase (peak_*_fd / peak_*_fd_muos).
+% Process one ch0/ch1 pair for every RFI method.
+% rows follows methods order and is empty for rejected products; rej is shared.
+% ramp and muos_mask select the full-band and MUOS frequency-domain products.
 
     nMeth = numel(methods);
     rows  = cell(1, nMeth);
@@ -383,9 +352,7 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
         return;
     end
 
-    % Read both channels. Each file is one channel, interleaved I/Q int16.
-    % Only the first num_segs*npts samples are needed (Python reads the
-    % same leading segments sequentially).
+    % Read the first num_segs*npts complex samples from each I/Q int16 channel.
     n_want = npts * cfg.num_segs;
     ch0 = read_channel(ch0_path, n_want);
     ch1 = read_channel(ch1_path, n_want);
@@ -397,18 +364,10 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
         return;
     end
 
-    % Coherent averaging of per-segment cross-correlations, accumulated per
-    % method. The unfiltered F0,F1 are computed once and reused; each method
-    % applies its identical-on-both-channels frequency-domain operator
-    % (rfi_excise), so the cross-spectrum is reweighted with no differential
-    % phase. 'none' returns F0,F1 unchanged -> identical to the v3 path.
-    % Accumulate the per-segment CROSS-SPECTRUM S = F0m.*conj(F1m) (unshifted
-    % fft order), not R_xy: the phase observable is read straight from S in the
-    % frequency domain (no ifft/sinc), and R_xy is recovered with a single ifft
-    % after averaging for the magnitude QA.
-    % P0_sum/P1_sum accumulate the per-channel windowed POWER spectra |F|^2 on
-    % the SAME segments and RFI operators as S_sum, so the channel powers below
-    % share c_full's window and 1/npts^2 normalization (direct=ch0, reflected=ch1).
+    % Average S = F0m.*conj(F1m) in unshifted FFT order. Applying the same RFI
+    % operator to both channels preserves differential phase. A single IFFT of
+    % the average supplies lag-domain QA. P0_sum/P1_sum use the same segments,
+    % window, operators, and 1/npts^2 normalization (direct=ch0, reflected=ch1).
     S_sum  = repmat({zeros(npts, 1)}, 1, nMeth);
     P0_sum = repmat({zeros(npts, 1)}, 1, nMeth);
     P1_sum = repmat({zeros(npts, 1)}, 1, nMeth);
@@ -416,8 +375,7 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
         i1 = (seg-1)*npts + 1;
         i2 =  seg   *npts;
 
-        % NOTE: .* with column slices — no transpose of complex data here.
-        % (A ' conjugate-transpose would silently negate every phase.)
+        % Keep complex data as columns; conjugate-transpose would negate phase.
         s0 = ch0(i1:i2) .* win;
         s1 = ch1(i1:i2) .* win;
 
@@ -446,8 +404,7 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
         end
     end
 
-    % Datetime (not raw digit string) so the CSV round-trips through
-    % readtable and matches the Python summary format (yyyy-MM-dd HH:mm:ss).
+    % Use datetime so readtable preserves the yyyy-MM-dd HH:mm:ss format.
     ts       = base_to_datetime(base_name);
     ovf      = uint8(ismember(base_name, overflow_set));
     has_muos = any(muos_mask);
@@ -506,8 +463,7 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
         row.pow_ch0_fd_muos        = pow_ch0_fd_muos;
         row.pow_ch1_fd             = pow_ch1_fd;
         row.pow_ch1_fd_muos        = pow_ch1_fd_muos;
-        row.session_id             = sid;   % v6: UHD-session sentinel (LAST —
-                                            % matches the in-place column patch)
+        row.session_id             = sid;   % Keep last to match metadata-only patches.
         rows{mi} = row;
     end
 end
@@ -551,8 +507,8 @@ function [peak_amp, peak_phase_deg, snr_db, noise_floor, meas_peak_lag] = ...
         extract_peak(R_xy, npts, target_lag, lag_half_win)
 % Extract correlation amplitude and phase at target_lag using sinc interpolation.
 %
-% Matches Python detect_peak_and_snr() + _extract_at_fractional_lag():
-%   1. Trim to ±lag_half_win lags around lag=0 (same as Python llm/uum window).
+% Algorithm:
+%   1. Trim to ±lag_half_win lags around lag=0.
 %   2. Noise floor = mean of outer 20% of the trimmed window.
 %   3. Sinc interpolation at target_lag using ±8 nearest integer lags.
 %   4. SNR = 10*log10(peak_power / noise_power).
@@ -575,13 +531,11 @@ function [peak_amp, peak_phase_deg, snr_db, noise_floor, meas_peak_lag] = ...
     [~, j_meas]   = max(mag);
     meas_peak_lag = double(lag_trim(j_meas));
 
-    % Noise floor from outer 20% of trimmed window (Python noise_fraction=0.2).
+    % Noise floor from the outer 20% of the trimmed window.
     n_noise = max(floor(n * 0.2), 10);
     noise_floor = mean([mag(1:n_noise); mag(end-n_noise+1:end)]);
 
-    % Sinc interpolation at target_lag (±8 taps, matches Python half_win=8).
-    % Python: hi = center + half_win + 1 with exclusive slice → center±8.
-    % MATLAB inclusive indexing → hi = center + half_win for the same window.
+    % Sinc interpolation uses the ±8 nearest integer lags.
     [~, center_trim] = min(abs(lag_trim - target_lag));
     half_win = 8;
     lo = max(1, center_trim - half_win);
@@ -605,7 +559,7 @@ end
 % =========================================================================
 function y = safe_sinc(x)
 % Normalized sinc: sin(pi*x) / (pi*x), with safe handling at x=0.
-% Equivalent to numpy.sinc(x) and MATLAB sinc(x) from Signal Processing Toolbox.
+% Uses the same normalization as MATLAB sinc(x).
     y      = ones(size(x));
     nz     = (x ~= 0);
     y(nz)  = sin(pi * x(nz)) ./ (pi * x(nz));
@@ -614,17 +568,15 @@ end
 
 % =========================================================================
 function v = getfield_default(s, name, default)
-% cfg field with a fallback when absent/empty (keeps {'none'} the default).
+% Return a cfg field or its fallback when absent or empty.
     if isfield(s, name) && ~isempty(s.(name)), v = s.(name); else, v = default; end
 end
 
 
 % =========================================================================
 function [ub, us, n_ambig] = base_sid_map(bases, sids)
-% Unique base -> session-sentinel map for the schema-v6 CSV patch. A base
-% name observed with more than one distinct sentinel (duplicate captures in
-% different session folders) is ambiguous -> "unknown". (Same helper as
-% compute_calib — stages stay self-contained.)
+% Map each unique base to a session sentinel; duplicates across sessions are
+% ambiguous and map to "unknown".
     [ub, ~, ic] = unique(bases);
     us = strings(size(ub));
     for k = 1:numel(ub)
@@ -636,7 +588,7 @@ end
 
 
 function s = sid_of(bases, map_b, map_s)
-% Sentinel lookup for CSV rows; bases not on disk any more -> "unknown".
+% Look up persisted bases; captures absent from disk map to "unknown".
     s = repmat("unknown", numel(bases), 1);
     [tf, loc] = ismember(bases, map_b);
     s(tf) = map_s(loc(tf));

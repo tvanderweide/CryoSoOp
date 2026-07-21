@@ -125,8 +125,7 @@ function apply_overrides(V)
     % own title, so they are excluded. The tag is a compact ' w/ Notch'
     % suffix (base adds nothing), matching the raw-view
     % convention (raw_cap_title) and minimizing title clutter. Idempotent:
-    % strip any prior tag — current suffix or the legacy '— dataset: …' form
-    % — before re-appending, so the standalone style-change calls above
+    % strip any supported prior tag before re-appending, so style-change calls
     % (font/legend) don't stack it. Title stays char here (raw multi-line
     % titles excluded). Skipped entirely when a sidebar title override is
     % active for this plot — that field is meant to be the WHOLE title.
@@ -425,8 +424,7 @@ end
 
 function tf = is_cand_kind(kind)
 % The satellite-candidates figure family: the two MUOS candidate views plus
-% 'L2: Sensor data' (renamed 2026-07-21 from 'L2: Candidates — raw (no
-% correction)'). One predicate so the render dispatch, the side-panel
+% 'L2: Sensor data'. One predicate keeps render dispatch, side-panel
 % control visibility, and the Phase-domain gating can never disagree.
     tf = startsWith(kind, 'L2: Candidates') || strcmp(kind, 'L2: Sensor data');
 end
@@ -478,18 +476,18 @@ end
 
 
 function A = fringe_latch(txt, ud, auto_mm)
-% Provenance-tracked state machine for the theoretical mm-per-fringe field.
-% Inputs: the field's current text, its UserData provenance struct (may be
+% Auto/manual state machine for the theoretical mm-per-fringe field.
+% Inputs: the field's current text, its UserData ownership struct (may be
 % empty on first use), and the geometry-computed auto rate (may be NaN when
 % geometry is unavailable). Returns struct A:
 %   .text — what the field should display (programmatic write; never flips
-%           provenance): the auto rate formatted %.0f while is_auto, blank
+%           ownership): the auto rate formatted %.0f while is_auto, blank
 %           while is_auto with NaN auto, the user's text verbatim otherwise
-%   .ud   — updated provenance {is_auto, last_auto_text, last_auto_mm}
+%   .ud   — updated ownership state {is_auto, last_auto_text, last_auto_mm}
 %   .mm   — the ACTIVE rate for the overlay: the UNROUNDED auto value while
 %           is_auto (display rounding must not change the physics), else
 %           fringe_pick(text, auto) so invalid manual text falls back to
-%           the auto VALUE without silently flipping provenance
+%           the auto VALUE without silently changing ownership
 % is_auto itself is owned by the edit callback (user typed nonempty →
 % manual; cleared → auto); this latch only refreshes display/value.
     if ~(isstruct(ud) && isfield(ud, 'is_auto'))
@@ -536,7 +534,7 @@ function [cols, labs] = domain_cols(V, T, c_sinc, c_fd, c_muos)
     % Resolve which phase column(s) to plot for the current Phase-domain
     % selection. Returns parallel cellstr `cols` (present in T) and `labs`
     % (legend labels). fd / fd_muos fall back to the sinc column if absent
-    % (old CSV not yet reprocessed); 'compare' overlays every available one.
+    % when those columns are absent; 'compare' overlays every available one.
     vn = T.Properties.VariableNames;
     switch domain_mode()
         case 'sinc'
@@ -596,9 +594,7 @@ end
 function ttl = raw_cap_title(V, base, D)
     dataset_label = @(varargin) V.U.dataset_label(V, varargin{:});
     % Title for a capture-based raw view: just '<base>' for the base/none
-    % dataset, or '<base> w/ Notch' when an RFI
-    % filter dataset is active. Replaces the older verbose
-    % 'filter: notch_interp (cfg.rfi_bands applied per segment)' form.
+    % dataset, or '<base> w/ Notch' when an RFI filter dataset is active.
     if isfield(D, 'method') && ~strcmp(D.method, 'none')
         lbl = char(dataset_label());          % 'notch'
         ttl = string(base) + " w/ " + [upper(lbl(1)) lbl(2:end)];
@@ -808,8 +804,8 @@ end
 
 
 function [phi, rho] = phoff_measure(ch0, ch1)
-% Inter-channel phase offset at lag 0 in the pipeline's D.*conj(R) order
-% (schema v5+, same expression as compute_calib's C_RDNS): phi =
+% Inter-channel phase offset at lag 0 in the pipeline's D.*conj(R) order,
+% matching compute_calib's C_RDNS: phi =
 % angle(mean(ch0 .* conj(ch1))) over the finite sample pairs, in radians.
 % rho is the normalized lag-0 coherence |C| / sqrt(<|D|^2><|R|^2>) in
 % [0,1]. Fail-closed: phi = rho = NaN when there are no finite pairs, a
@@ -874,7 +870,7 @@ end
 
 function tstr = phoff_title(base, phi, rho, sw_on)
 % Title for 'Raw: Phase Offset' (pure so the three states are testable).
-% Rule (user spec 2026-07-20): the phi/rho numbers appear ONLY while the
+% The phi/rho numbers appear only while the
 % correction is applied — their presence is the on-indicator, so there is
 % no 'correction ON/OFF' text. Switch on with no usable correlation says
 % so explicitly (never a silent no-op).
@@ -894,8 +890,7 @@ end
 function spans = freeze_spans(t, y)
 % Above-freezing spans for the wet-snow band overlay: contiguous runs of
 % samples with y > 0 (STRICT) become [start end] datetime intervals padded
-% by half the sampling interval on each side. Pure and testable. Contract
-% (2026-07-20 plan gate):
+% by half the sampling interval on each side. Contract:
 %   - t (datetime) and y must have equal length; both are canonicalized to
 %     sorted columns. Rows with NaT timestamps are dropped.
 %   - Rows with non-finite y are KEPT as cold separators — a present-but-
@@ -1137,9 +1132,8 @@ end
 function v = snrcut_start(cfg)
 % Validated starting value for the SNR-cutoff spinner: cfg.snr_threshold
 % (the producer's scoring floor) when it is a real finite numeric scalar,
-% else 10 (the pipeline default). Note this is the CONFIGURED cutoff — the
-% candidates CSV carries no threshold provenance, so a file produced under
-% a different setting differs from this starting value.
+% else 10 (the pipeline default). The candidates CSV does not record its
+% production cutoff, which may differ from this configured starting value.
     v = 10;
     if isfield(cfg, 'snr_threshold')
         t = cfg.snr_threshold;

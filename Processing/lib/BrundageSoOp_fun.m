@@ -4,11 +4,9 @@ function F = BrundageSoOp_fun()
 % Returns a struct of function handles so the viewer can stay UI-only:
 %   M = BrundageSoOp_fun();  P = M.welch_psd(x, fs, seg_len);
 %
-% Everything here is "the math (and data IO) that feeds the displays" —
-% moved verbatim out of BrundageSoOp_viewer.m. DSP conventions (Hanning
-% window, FFT/conj/fftshift order, dB, circular statistics, sc16 read
-% order) are unchanged; only the location moved. The viewer's side panel
-% links each plot back to the function used here.
+% Contains the math and data IO that feed the displays. DSP conventions are
+% Hann windows, FFT/conj/fftshift ordering, dB units, circular statistics, and
+% sc16 sample ordering. The viewer side panel names each plot's helper.
 
     F.hann_win         = @hann_win;
     F.circ_stats       = @circ_stats;
@@ -182,13 +180,13 @@ function b = second_out(f, varargin), [~, b] = f(varargin{:}); end
 % =========================================================================
 
 function w = hann_win(N)
-% Hanning window matching numpy.hanning(N) (and compute_L1).
+% Hann window matching compute_L1.
     n = (0:N-1)';
     w = 0.5 * (1 - cos(2*pi*n / (N-1)));
 end
 
 function [P, f] = welch_psd(x, fs, seg_len)
-% Welch-averaged PSD, non-overlapping Hanning segments, fftshifted.
+% Welch-averaged PSD, non-overlapping Hann segments, fftshifted.
 % ~34 averages at seg_len=2^20 over a 36M-sample capture.
     n_segs = floor(numel(x) / seg_len);
     X = reshape(x(1:n_segs*seg_len), seg_len, n_segs);
@@ -234,7 +232,7 @@ function [fd, Pd] = decimate_spectrum(f, P, n_pts, mode)
 end
 
 function [A0, A1, f] = fft_amp_fullband(ch0, ch1, fs, npts)
-% Full-band amplitude spectrum: |FFT| of a single Hanning-windowed segment,
+% Full-band amplitude spectrum: |FFT| of a single Hann-windowed segment,
 % fftshifted to -fs/2..+fs/2 (= full RF band), max-hold decimated to ~4000
 % display points. Y values are dB relative to each channel's own median noise
 % floor (middle 80% of band), so 0 dB = noise level and peaks are above 0.
@@ -290,7 +288,7 @@ end
 function D = xcorr_profile(ch0, ch1, npts, num_segs, lag_half_win)
 % Same windowed, segment-averaged cross-correlation as compute_L1,
 % trimmed to the L1 analysis window (±lag_half_win around lag 0).
-% npts/num_segs/lag_half_win are passed in (were cfg/derived in the viewer).
+% npts, num_segs, and lag_half_win are explicit inputs.
     win = hann_win(npts);
     n_segs = min(floor(numel(ch0) / npts), num_segs);
     R_sum = zeros(npts, 1);
@@ -345,9 +343,8 @@ end
 
 function T = read_product(csv_path)
 % Read a product CSV; returns an empty table if absent. The timestamp column is
-% normalized to datetime, tolerating BOTH the ISO 'yyyy-MM-dd HH:mm:ss' format
-% (current compute_L1 output) and MATLAB's default 'dd-MMM-yyyy HH:mm:ss' display
-% format that older writes / the overflow-flag patch left in some CSVs. The
+% normalized to datetime, accepting ISO 'yyyy-MM-dd HH:mm:ss' and MATLAB's
+% default 'dd-MMM-yyyy HH:mm:ss' display format. The
 % timestamp is forced to TEXT on read: readtable's datetime auto-detect locks
 % onto ONE format and silently NaTs the minority rows (dropping them from every
 % plot), so we control the parse ourselves.
@@ -416,16 +413,15 @@ function WX = load_snodar(cfg)
 % loggers run FIXED standard time year-round, no DST), timestamps are converted
 % into the capture timebase (cfg.capture_tz if set, else UTC) so the viewer
 % overlay aligns with the capture timestamp column. When cfg.wx_tz is absent,
-% timestamps pass through unconverted (legacy behavior: logger clock as-is).
+% timestamps pass through as recorded by the logger.
 %
 % Uses SnoDAR_snow_depth_Avg directly. The device applies its own per-season
 % calibrated reference height (~2.81 m WY2024, ~3.79 m WY2026); a fixed
 % distance-based formula causes season-dependent offsets up to ~1 m.
 %
-% Calibration drift flag: 2025-03-16 to ~2025-06, the device's internal reference
-% reset to ~5.016 m (distance + snow_depth jumped to 5.016 m). Rows above
-% drift_thr = 4.2 m are set to NaN — above the highest legitimate seasonal sum
-% (~3.79 m) and well below the drift value.
+% Calibration drift flag: rows with distance + snow_depth above 4.2 m are NaN.
+% This is above the highest calibrated seasonal reference (~3.79 m) and below
+% the observed drift/configuration state (~5.016 m).
 %
 % Spike/dip filter: 97-point sliding median (24-hour window at 15-min sampling)
 % removes near-zero dips and spikes from people or maintenance under the sensor.
@@ -437,9 +433,9 @@ function WX = load_snodar(cfg)
         drift_thr = 4.2;    % m — distance + snow_depth above this = drift/config anomaly
         spike_thr = 0.5;    % m — deviation from 97-pt median to flag as spike/dip
         swe_spike_thr   = 100;  % mm w.c. — SWE deviation from 97-pt median to flag as a
-                                % transient (p99 sample-to-sample noise is 2.1 mm; audit
-                                % 2026-07-20: removes a 13-sample ~110 mm dip-and-recover
-                                % artifact, keeps persistent steps like 2025-04-12 +175 mm)
+                                % transient (p99 sample-to-sample noise is 2.1 mm; rejects
+                                % ~110 mm dip-and-recover artifacts but keeps persistent
+                                % steps of at least ~175 mm)
         swe_min_support = 13;   % min finite samples in the 97-pt window (~3 h at 15 min)
                                 % — sparser support can make an isolated bad value its
                                 % own median, so such samples are masked instead
@@ -480,7 +476,7 @@ function WX = load_snodar(cfg)
         % optional sensor. cfg.wx_swe_cols overrides the two header names in
         % order {value, errcode}. Value column absent -> swe_mm all-NaN,
         % silently; value present without its errcode column -> values kept
-        % unmasked, with one partial-schema warning (QC unavailable).
+        % unmasked, with one warning that error-code QC is unavailable.
         swe_cols = {'SS_SWE_Avg', 'SS_SWE_ErrCode_Avg'};
         if isfield(cfg, 'wx_swe_cols') && numel(cfg.wx_swe_cols) >= 2
             swe_cols = cfg.wx_swe_cols(1:2);

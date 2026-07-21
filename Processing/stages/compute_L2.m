@@ -20,49 +20,26 @@ function compute_L2(cfg)
 %   and phase_raw_fd_muos_deg / phase_corr_fd_muos_deg (MUOS sub-channels). The
 %   geometric correction is shared; only the L1 phase differs across variants.
 %
-% Chain-phase calibration columns (schema 2026-07-17, session-keyed):
-% phase_chain_deg is the per-UHD-session receiver-chain differential phase
-% from the same product dir's calib CSV, using the NL-only estimator
-% angle(C_RDNS) — gr-doa-style: the two channels' phase difference measured
-% from the noise-source state alone. (The leak-cancelled NS-L estimator
-% angle(C_RDNS - C_RDL) was retired 2026-07-20; the correlated NL/L
-% baseline, measured rho_DRL ~ 0.2, is now included by choice — see
-% chain_phase_runs.) Sessions come from the schema-v6 session_id sentinels
-% (lib/session_key.m): run-folder-keyed captures join their own session's
-% calib run by EXACT identity (no time limit — elapsed time is diagnostic
-% only); "legacy-flat" captures keep the historical nearest-gap-run join
-% within chain_join_tol_min; "unknown" provenance and keyed captures with no
-% same-session calib get NaN (never a neighbor's phase). chain_session
-% records the association per row. phase_corr_cal_deg (+_fd/_fd_muos)
-% = wrap180(phase_corr* - phase_chain_deg): FULL per-session subtraction,
-% gr-doa-style common-reference zeroing at the injection plane, with no
-% reference constant (chain_phase_ref_deg retired 2026-07-17 — ignored if a
-% caller still sets it; the -81.4/0 anchor history:
-% docs/config-reference.md#chain-cal-knobs). The chain phase is treated as
-% FREQUENCY-FLAT across the sinc/fd/fd_muos domains (accepted 2026-07-17 —
-% see the note at the application site below).
+% Chain calibration uses each UHD session's circular mean of angle(C_RDNS),
+% where C_RDNS follows D.*conj(R). Run-folder captures join calibration by
+% exact session_id; "legacy-flat" captures use the nearest gap-defined run
+% within chain_join_tol_min. Unknown or unmatched sessions remain NaN.
+% phase_corr_cal_deg (+_fd/_fd_muos) subtracts the full phase_chain_deg with
+% no reference constant. The chain phase is assumed frequency-flat across
+% the sinc, fd, and fd_muos domains. chain_session records each association.
 %
-% Incremental: appends only captures not already in the L2 CSV; a schema
-% change (new az_deg / fd / chain-cal / chain_session columns) archives the
-% whole CSV and reprocesses all captures (cheap — just interpolation), so
-% the appended rows stay column-aligned. Chain-cal dependency gate (checked
-% BEFORE the incremental filter): the config/algorithm stamp
-% (BrundageSoOp_L2_chaincal_stamp.json) must match AND every existing row's
+% Incremental: appends captures not already in the L2 CSV. An incompatible
+% schema archives the output and recomputes all captures. Before filtering,
+% the chain-cal dependency gate requires the config/algorithm stamp
+% (BrundageSoOp_L2_chaincal_stamp.json) to match and every existing row's
 % freshly recomputed chain association (phase + session) must equal what it
-% has stored — so config/algorithm changes, shifted run means, newly USABLE
-% calibration (e.g. after the v6 migration), and repaired session_id values
-% all force a full rebuild; a rebuild also renames any sigma0 product aside
-% (_stale_*). Captures outside the elevation table's time span get theta =
-% NaN and are skipped with a message (extend the table rather than
-% extrapolating).
+% stores. Any mismatch triggers a full rebuild and marks an existing sigma0
+% product stale. Captures outside the elevation table span are skipped rather
+% than extrapolated.
 %
-% Timezone: cfg.capture_tz names the timebase of the capture filename
-% stamps; the elevation table is UTC. Legacy 2025-26 data used the Pi's
-% LOCAL clock ('America/Boise', verified via timedatectl 2026-06-12) and
-% the conversion below handles MST/MDT including the March DST change.
-% cryosoop builds from 2026-07 on stamp UTC in code — capture_tz "UTC"
-% makes to_utc an exact identity. If cfg.capture_tz is absent,
-% timestamps are assumed to already be UTC.
+% cfg.capture_tz names the capture-filename timebase; elevation tables are UTC.
+% Zone conversion handles daylight-saving transitions. If capture_tz is absent
+% or "UTC", timestamps pass through unchanged.
 %
 
     sig_csv = fullfile(cfg.out_dir, 'BrundageSoOp_L1_sig.csv');
@@ -96,38 +73,27 @@ function compute_L2(cfg)
                  'included. Re-run compute_L1 to add overflow flags.\n'], sig_csv);
     end
 
-    % --- Chain-cal inputs, computed up front: the dependency gate below must
-    %     see the run table BEFORE the incremental existing-base filter. ---
+    % --- Build chain-cal inputs before incremental filtering ---
+    % The dependency gate must see associations for every existing row.
     % Chain-cal knobs, both overridable from cfg (docs/config-reference.md#chain-cal-knobs).
-    % There is NO reference knob: the per-session chain phase is subtracted in
-    % full (chain_phase_ref_deg retired 2026-07-17; the field is ignored if a
-    % caller still sets it).
+    % The per-session chain phase is always subtracted in full.
     chain_gap_min = getfield_default(cfg, 'chain_run_gap_min',  20);
     chain_tol_min = getfield_default(cfg, 'chain_join_tol_min', 60);
     R = chain_phase_runs(fullfile(cfg.out_dir, 'BrundageSoOp_calib.csv'), chain_gap_min);
     stamp_path = fullfile(cfg.out_dir, 'BrundageSoOp_L2_chaincal_stamp.json');
-    % algo_version 3 (2026-07-20): NL-only chain estimator (angle(C_RDNS)
-    % session mean; the leak-cancelled NS-L estimator is retired). v1/v2
-    % stamps mismatch and rebuild once — v2 products carry NS-L-derived
-    % phase_chain_deg values that must be replaced, not appended to.
+    % The algorithm stamp identifies the NL-only angle(C_RDNS) session mean.
     stamp_now  = struct('algo_version', 3, ...
                         'chain_run_gap_min',  chain_gap_min, ...
                         'chain_join_tol_min', chain_tol_min, ...
                         'runs', runs_struct(R));
 
-    % --- Chain-phase join, computed for EVERY capture up front ---
-    % The incremental gate below compares these fresh associations against
-    % the stored rows, so a change in what any existing row WOULD get —
-    % newly usable calibration, a repaired session_id, a shifted run mean —
-    % forces a rebuild instead of leaving stale values behind.
+    % --- Join every capture to its current chain phase ---
+    % Comparing these associations with stored rows prevents stale appends.
     [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, cfg.out_dir);
 
-    % Incremental + schema upkeep (see header) — skip captures already in the
-    % L2 CSV only when (a) the CSV is current-schema, (b) the chain-cal
-    % config/algorithm stamp is unchanged, and (c) every existing row's
-    % freshly recomputed chain association (phase + session, NaN-safe)
-    % matches what it has stored. Anything else archives the CSV, renames any
-    % sigma0 product aside, and reprocesses all captures (cheap).
+    % --- Validate schema and dependencies before selecting new captures ---
+    % Incremental append requires the current columns, matching chain-cal stamp,
+    % and NaN-safe equality of every stored phase/session association.
     if isfile(out_csv)
         prev = readtable(out_csv, 'TextType', 'string');
         pv   = prev.Properties.VariableNames;
@@ -218,20 +184,11 @@ function compute_L2(cfg)
     [phase_raw_fd,      phase_corr_fd]      = corr_variant(T, 'peak_phase_deg_fd',      phase_geom);
     [phase_raw_fd_muos, phase_corr_fd_muos] = corr_variant(T, 'peak_phase_deg_fd_muos', phase_geom);
 
-    % --- Receiver chain-phase calibration application ---
-    % phase_chain / chain_session were computed for the FULL capture set by
-    % chain_join() before the incremental gate (and filtered alongside T), so
-    % here they are simply applied.
+    % --- Apply receiver chain-phase calibration ---
     % SIGN: compute_L1 and compute_calib share the D.*conj(R) convention
-    % (unified 2026-07-06), so subtracting the calib chain phase removes the
-    % receiver-chain differential from the signal phase directly, IN FULL —
-    % the corrected phase is zeroed at the calibration injection reference
-    % plane using only the capture's own session. There is no reference
-    % constant (chain_phase_ref_deg retired 2026-07-17; history in
-    % docs/config-reference.md#chain-cal-knobs). The chain phase itself is
-    % the NL-only angle(C_RDNS) session mean (NS-L leak-cancelled estimator
-    % retired 2026-07-20 — see chain_phase_runs).
-    % FREQUENCY-FLAT ASSUMPTION (accepted 2026-07-17): one full-band, lag-zero
+    % so subtracting the NL-only angle(C_RDNS) session mean removes the receiver
+    % differential in full and zeroes phase at the injection reference plane.
+    % FREQUENCY-FLAT ASSUMPTION: one full-band, lag-zero
     % chain phase is applied to all three phase domains (sinc / fd / fd_muos).
     % Revisit via the nl_peak_lag / l_peak_lag diagnostics if a differential
     % group delay or band-dependent chain response is ever suspected.
@@ -277,7 +234,7 @@ end
 function [raw, corr] = corr_variant(T, col, phase_geom)
 % L1 phase column `col` and its elevation-corrected wrap180(col - phase_geom),
 % sharing the geometry-only phase_geom. NaN-filled if `col` is absent (L1 not
-% yet reprocessed for the frequency-domain phase).
+% missing that frequency-domain phase column).
     if ismember(col, T.Properties.VariableNames)
         raw  = T.(col);
         corr = wrap180(raw - phase_geom);
@@ -289,22 +246,17 @@ end
 
 
 function R = chain_phase_runs(calib_csv, gap_min)
-% Per-run receiver-chain differential phase from the calib CSV, using the
-% NL-only estimator angle(C_RDNS) — gr-doa-style (phase difference between
-% the two channels measured from the noise-source state alone, D.*conj(R)
-% sign convention). The leak-cancelled NS-L estimator angle(C_RDNS - C_RDL)
-% was retired 2026-07-20 (user decision, gr-doa parity): the correlated
-% NL/L inter-channel baseline (measured rho_DRL ~ 0.2) is now INCLUDED in
-% the estimate by choice; its magnitude/stability stays observable in the
-% 'Calib: Chain phase (NS - L)' viewer diagnostic.
+% Compute per-session receiver-chain phase as the circular mean of
+% angle(C_RDNS), using the D.*conj(R) convention. This NL-only estimate includes
+% the correlated NL/L baseline (measured rho_DRL ~ 0.2); the viewer reports NS-L
+% as a diagnostic.
 %
 % Degenerate pairs fail closed: nonfinite or nonpositive C_RDNS_amp leaves
 % the phasor direction undefined, so such pairs are excluded before the
 % reduction (n counts usable pairs); a run whose circular-mean resultant is
 % ~zero (no defined direction) returns NaN, never atan2(0,0) = 0.
 %
-% Run identity (session-keyed, 2026-07-17): pairs with a run-folder session
-% key form one run per exact key (one cryosoop folder == one UHD session);
+% Pairs with a run-folder session key form one run per exact key;
 % "legacy-flat" pairs are grouped by >gap_min time gaps with run key
 % "gap:<mean time>"; "unknown"-provenance pairs are EXCLUDED (fail closed).
 % Overflow-flagged pairs are excluded. Each run reduces to an equal-weight
@@ -390,8 +342,7 @@ end
 
 
 function s = session_sentinels(T)
-% Normalized session sentinels for the L1 signal rows; a missing column means
-% the CSV predates schema v6 -> every row "unknown" (chain cal fails closed).
+% Normalize L1 session sentinels; a missing column maps every row to "unknown".
     if ~ismember('session_id', T.Properties.VariableNames)
         fprintf(['[L2] WARNING(chaincal-prov): L1 CSV has no session_id column ' ...
                  '— chain calibration disabled (NaN columns). Re-run compute_L1 ' ...
@@ -408,7 +359,7 @@ end
 
 
 function [s, n_bad] = norm_sentinels(raw)
-% Canonicalize persisted session sentinels (schema v6) on the CSV read path:
+% Canonicalize persisted session sentinels on the CSV read path:
 % trim, '\' -> '/', case-normalize the reserved sentinels, and validate the
 % "<YYYYMMDD>/<HHMMSS>" run-key shape. Anything else is malformed and fails
 % closed to "unknown" — session_key.m guarantees canonical values at write
@@ -439,11 +390,10 @@ end
 
 
 function [phase_chain, chain_session] = chain_join(T, R, chain_tol_min, out_dir)
-% Session-keyed chain-phase join over the FULL capture table (2026-07-17).
+% Join the full capture table to session-keyed chain phases.
 % Signal rows with a run-folder session key join their own UHD session's
-% calib run by exact identity — same session is definitionally correct, so
-% elapsed time is a diagnostic only. "legacy-flat" rows keep the historical
-% nearest-gap-run join within chain_tol_min. "unknown" provenance and keyed
+% calib run by exact identity; elapsed time is diagnostic only. "legacy-flat"
+% rows use the nearest gap-defined run within chain_tol_min. "unknown" rows and keyed
 % rows with no same-session calib get NaN — never a neighboring session's
 % phase (borrowing across sessions would contradict the session-constant
 % offset model this correction rests on).
@@ -498,16 +448,9 @@ end
 
 
 function ok = chain_stamp_config_matches(stamp_path, stamp_now)
-% True only if the stored dependency stamp exists, parses, and agrees on the
-% algorithm version + chain config. algo_version 3 is the NL-only-estimator
-% schema (2026-07-20); v2 (no-reference, NS-L estimator, 2026-07-17) and v1
-% (chain_phase_ref_deg) stamps both mismatch here, forcing the correct
-% one-time rebuild that replaces NS-L-derived values. Calibration-content and
-% provenance changes are caught separately by chain_assoc_matches, which
-% compares every existing row's freshly recomputed association directly (a
-% run-table proxy comparison proved unsafe: it could not see newly USABLE
-% calibration — empty-runs stamps or added runs satisfying previously
-% unmatched rows).
+% Require the stored dependency stamp to parse and match the current algorithm
+% and chain configuration. chain_assoc_matches checks calibration content and
+% row-level associations separately.
     ok = false;
     if ~isfile(stamp_path), return; end
     try
@@ -526,13 +469,8 @@ end
 
 
 function ok = chain_assoc_matches(prev, T, phase_chain, chain_session)
-% True only if every already-written row's freshly recomputed chain
-% association equals what it has stored: same phase (NaN == NaN, else 1e-6
-% deg) and same chain_session. A prev row whose base_name is no longer in
-% the current (overflow-filtered) capture table also fails — its provenance
-% changed. This is the dependency check that catches newly usable
-% calibration, late-added pairs shifting a session mean, and repaired
-% session_id values.
+% Verify every stored row's recomputed chain phase (NaN-safe, 1e-6 deg
+% tolerance) and chain_session. Missing bases also invalidate the dependency.
     ok = false;
     [tf, loc] = ismember(prev.base_name, T.base_name);
     if ~all(tf), return; end
@@ -587,16 +525,14 @@ end
 
 
 function v = getfield_default(s, name, default)
-% cfg field with fallback when absent/empty (same helper as compute_calib).
+% Return a cfg field or its fallback when absent or empty.
     if isfield(s, name) && ~isempty(s.(name)), v = s.(name); else, v = default; end
 end
 
 function t_utc = to_utc(t, cfg)
 % Convert naive capture timestamps (cfg.capture_tz timebase) to naive UTC.
-% Declaring the zone keeps the clock face; switching to UTC converts the
-% instant (MST/MDT and the March DST change handled automatically for
-% legacy local-clock seasons; exact identity when capture_tz is 'UTC',
-% the setting for UTC-stamped cryosoop data).
+% Declaring the source zone keeps its clock face; switching to UTC converts the
+% instant and handles daylight-saving transitions. UTC is an identity mapping.
     if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz)
         t.TimeZone = cfg.capture_tz;
         t.TimeZone = 'UTC';

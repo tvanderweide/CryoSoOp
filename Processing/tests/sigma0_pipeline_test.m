@@ -1,8 +1,7 @@
 function tests = sigma0_pipeline_test
-% Production-stage tests for compute_L1 (channel powers, RFI-operator
-% consistency, schema migration / incremental recovery) and soop_run_pipeline
-% dispatch — the compute-path coverage accepted in disposition 8 that the pure
-% sigma0_geometry_test suite does not exercise.
+% Production-stage tests for compute_L1 channel powers, RFI-operator consistency,
+% output recovery, and soop_run_pipeline dispatch. Complements the pure-math
+% coverage in sigma0_geometry_test.
 %
 % All fixtures are tiny (npts = floor(fs*Ti) = 1000, 2 segments) and rng-seeded
 % so the suite stays fast and deterministic. Every test writes a real int16
@@ -144,12 +143,11 @@ end
 
 
 % =========================================================================
-% C. Schema migration + interrupted-recovery
+% C. Output compatibility and interrupted-run recovery
 % =========================================================================
 function test_L1_migration_chanpow(tc)
-% A sig CSV that HAS peak_phase_deg_fd but LACKS the four pow columns is archived
-% (_pre_chanpow_<stamp>) and the season reprocessed so the regenerated CSV has
-% all four pow columns.
+% A signal CSV lacking all four channel-power columns is archived and rebuilt
+% with the complete column set.
     [cfg, d] = l1_cfg(tc);
     write_gen(cfg.data_dir, "UHF_20260101120000", cfg, 11);
     write_gen(cfg.data_dir, "UHF_20260101130000", cfg, 12);
@@ -159,7 +157,7 @@ function test_L1_migration_chanpow(tc)
     T0  = readtable(csv, 'TextType', 'string');
     n0  = height(T0);
 
-    % Drop the four pow columns -> pre-channel-power ("old") schema.
+    % Drop all four channel-power columns.
     T_old = drop_cols(T0, {'pow_ch0_fd','pow_ch0_fd_muos','pow_ch1_fd','pow_ch1_fd_muos'});
     writetable(T_old, csv);
 
@@ -174,8 +172,7 @@ function test_L1_migration_chanpow(tc)
 end
 
 function test_L1_migration_partial_schema(tc)
-% A PARTIAL channel-power schema (only pow_ch0_fd present) still counts as
-% missing -> archived and reprocessed to the full four columns.
+% A partial channel-power set is also archived and rebuilt in full.
     [cfg, d] = l1_cfg(tc);
     write_gen(cfg.data_dir, "UHF_20260101120000", cfg, 21);
 
@@ -195,8 +192,8 @@ function test_L1_migration_partial_schema(tc)
 end
 
 function test_L1_migration_mixed_methods(tc)
-% Mixed method dirs: base dir OLD schema, notch dir NEW schema. Only the base
-% dir is archived + reprocessed; the up-to-date notch dir is left untouched.
+% With one incomplete method directory, rebuild only that directory and leave
+% the complete method output untouched.
     [cfg, d] = l1_cfg(tc);
     cfg.rfi_methods = {'none', 'notch_interp'};
     cfg.rfi_bands   = 1e6 * [369.98 370.00];
@@ -217,15 +214,15 @@ function test_L1_migration_mixed_methods(tc)
     notch_arch = dir(fullfile([d '_notch'], 'BrundageSoOp_L1_sig_pre_*.csv'));
     verifyEqual(tc, numel(base_arch),  1, 'base dir should be archived');
     verifyEqual(tc, numel(notch_arch), 0, 'up-to-date notch dir must not archive');
-    % Both dirs end with the full four-column schema.
+    % Both directories end with all four channel-power columns.
     verifyTrue(tc, has_pow_cols(readtable(base_csv,  'TextType', 'string')));
     verifyTrue(tc, has_pow_cols(readtable(notch_csv, 'TextType', 'string')));
 end
 
 function test_L1_interrupted_recovery(tc)
-% Incremental recovery: after a valid full-schema CSV, dropping the last row
+% Incremental recovery: after a valid complete CSV, dropping the last row
 % (as a killed mid-append run would) is repaired by re-running — the missing
-% pair is reprocessed and appended, with NO archive (schema already complete).
+% pair is recomputed and appended without an archive.
     [cfg, d] = l1_cfg(tc);
     write_gen(cfg.data_dir, "UHF_20260101120000", cfg, 41);
     write_gen(cfg.data_dir, "UHF_20260101130000", cfg, 42);
@@ -393,7 +390,7 @@ function [pfd, pmuos] = expected_pow_notch(ch, win, npts, n_segs, mask, cfg)
 end
 
 function w = hann_local(npts)
-% Hanning window matching compute_L1 / numpy.hanning(npts).
+% Hann window matching compute_L1.
     n = (0:npts-1)';
     w = 0.5 * (1 - cos(2*pi*n / (npts-1)));
 end

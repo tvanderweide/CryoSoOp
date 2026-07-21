@@ -89,9 +89,8 @@ function soop_viewer_render_l2(V, kind)
     end
 
     % --- Satellite candidates (phase) with optional weather overlay ---
-    % Formerly split into "L2: Candidates" (phase only) and "L2: + SNOdar"
-    % (phase + depth + temperature). Now unified: phase always draws; snow
-    % depth and the two station temperatures each toggle via a checkbox.
+    % Candidate views always draw phase; snow depth and station temperatures
+    % are optional checkbox-controlled overlays.
     if V.U.is_cand_kind(kind)
         if isempty(S.CAND)
             show_msg('Needs sat_candidates_corrected.csv — run compare_sat_candidates');
@@ -105,7 +104,7 @@ function soop_viewer_render_l2(V, kind)
         % the higher threshold). The title notes the cutoff only when it
         % differs from the validated configured start (state-based, never
         % keyed to how many rows a given range lost). snr_ok is false for
-        % pre-snr_db candidate products (spinner disabled in callbacks).
+        % products without snr_db (spinner disabled in callbacks).
         snr_cut = S.sp_snrcut.Value;
         [CAND, snr_ok] = V.U.snrcut_apply(S.CAND, snr_cut);
         snr_note = '';
@@ -334,10 +333,10 @@ function soop_viewer_render_l2(V, kind)
         % nothing). Anchoring/availability live in the pure theory_overlay
         % helper; the legend carries the paper-sign and record-start-anchor
         % labels.
-        % Geometry-computed fringe rate + the provenance-tracked field latch
+        % Geometry-computed fringe rate and the auto/manual field latch
         % run on EVERY family render (not only when theory is checked) so
         % the mm/2pi field shows the actual auto value instead of a
-        % placeholder. The latch never flips auto/manual provenance (owned
+        % placeholder. The latch never changes auto/manual ownership (owned
         % by on_fringe_edit) and passes the UNROUNDED auto rate to the
         % overlay — display rounding must not change the physics.
         th = NaN;

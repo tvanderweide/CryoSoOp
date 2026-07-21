@@ -138,9 +138,8 @@ function rebuild_caplist(V, reset_sel)
         return;
     end
     pat = CAP_PATTERNS.(S.dd_ctype.Value);
-    % Recursive glob: '**' matches zero or more folder levels, so this finds
-    % both the new cryosoop per-run subfolders (<data_root>/<YYYYMMDD>/
-    % <HHMMSS>/) and the old flat single-folder season in one pass. Record each
+    % Recursive glob: '**' covers run subfolders (<data_root>/<YYYYMMDD>/
+    % <HHMMSS>/) and a flat data root in one pass. Record each
     % discovered capture's actual folder (base names are globally unique) so
     % rr_load_capture reads _ch0/_ch1 from the right place, not cfg.data_dir.
     d = dir(fullfile(cfg.data_dir, '**', pat));
@@ -238,8 +237,7 @@ function on_export(V)
     % Figures save to cfg.fig_dir (one stable folder per dated run, shared
     % across base/notch — the dataset tag above distinguishes them),
     % not cfg.out_dir, which switches between L1/L1_notch as the
-    % Dataset dropdown changes. Falls back to cfg.out_dir for callers that
-    % launch the viewer with an older cfg lacking fig_dir.
+    % Dataset dropdown changes. cfg.out_dir is used when fig_dir is absent.
     if isfield(cfg, 'fig_dir') && ~isempty(cfg.fig_dir)
         fig_dir = cfg.fig_dir;
     else
@@ -275,9 +273,8 @@ function refresh(V)
     unbusy = @(varargin) V.CB.unbusy(V, varargin{:});
     % Re-entrancy guard. Building a plot creates a uiprogressdlg, whose
     % internal drawnow lets a queued Prev/Next/dropdown callback interrupt
-    % the in-progress render. Without this, the interrupting (newer)
-    % selection renders first and then the original (older) render resumes
-    % and overwrites it — so the displayed capture lags the control. Here
+    % the in-progress render. Without this, the interrupting selection renders
+    % first and then the interrupted render resumes and overwrites it. Here
     % we coalesce: a refresh that arrives mid-render only flags 'pending',
     % and the active render re-runs once on exit against the latest state.
     % This covers every control and plot type, not just Prev/Next on the
@@ -425,7 +422,7 @@ function render_now(V)
     if is_cand
         % The spinner works only when the loaded candidate product carries
         % snr_db (S.CAND follows the Dataset dropdown, so re-check every
-        % render). Disabled = old product; regenerate to filter.
+        % render). Products without snr_db disable the control.
         S.sp_snrcut.Enable = matlab.lang.OnOffSwitchState(V.U.snrcut_usable(S.CAND));
     end
 

@@ -2,16 +2,9 @@ function compute_calib(cfg)
 % Calibration pipeline from NL (noise+load) and L (load-only) captures.
 % Implements IIP-SoOpSAR-processing-equations-v8.md Section 2.1, Eqs. 23-40.
 %
-% Pairing: all NL and L captures are grouped into runs (by containing
-% subfolder for the cryosoop <YYYYMMDD>/<HHMMSS>/ layout, else by inter-capture
-% time gaps for a legacy flat directory), then the k-th NL pairs with the k-th
-% L in chronological order within each run. A legacy 2NL+2L run reproduces the
-% old positional pairing (1st NL <-> 1st L, 2nd NL <-> 2nd L); a cryosoop
-% 4NL+4L run pairs leading NL<->leading L and trailing NL<->trailing L, so the
-% new trailing NL/L sets are genuinely usable (they share the same single UHD
-% session as the rest of the run). If the rank-matched L is overflowed and a
-% clean L exists in the run, the nearest-in-time clean L is substituted (the
-% row is kept + flagged if every L in the run is overflowed).
+% Groups captures by run folder or, for a flat layout, by time gap; the k-th NL
+% pairs with the k-th L chronologically. An overflowed L is replaced by the
+% nearest clean L in its run when possible; otherwise the flagged pair is kept.
 %
 % GPIO calibration states (set by BeagleBone Black):
 %   UHF__NL_*  — noise + load injected (GPIO 0,0,0)
@@ -25,44 +18,21 @@ function compute_calib(cfg)
 % for stability monitoring is their consistency over time. rho_DRL and
 % rho_DRNS are dimensionless and unaffected by scale.
 %
-% Cross-correlation convention (schema v5+): C_RDL and C_RDNS are formed as
-% D.*conj(R) (direct = ch0, reflected = ch1), MATCHING compute_L1. Schemas
-% v1-v4 used the reflected-first order R.*conj(D), so their C_RDL_phase_deg /
-% C_RDNS_phase_deg are the NEGATION of v5 values (amplitudes, powers, gains and
-% rho magnitudes are identical). Compare phase across the v5 boundary only
-% after negating the older columns.
+% Cross-correlation convention: C_RDL and C_RDNS use D.*conj(R)
+% (direct = ch0, reflected = ch1), matching compute_L1.
 %
 % Output: cfg.out_dir/BrundageSoOp_calib.csv (appended per batch — an
-% interrupted run resumes from the last completed batch). Current schema
-% (v6) columns include rho_DRL, rho_DRNS, SNR_DNS (Eq. 39a), SNR_RNS
-% (Eq. 39b), P_NS, overflow_flag, nl_peak_lag, l_peak_lag, n_samps_nl,
-% n_samps_l, session_id.
-%
-% Schema history v1->v5 (each old version archived to *_v<N>_<date>.csv
-% and reprocessed):
-%   v2 adds rho_DRNS. v3 adds SNR_DNS/SNR_RNS/P_NS. v4 adds nl_peak_lag/
-%   l_peak_lag (measured ch0/ch1 delay lag, diagnostic only — cannot be
-%   back-patched, needs the raw FFTs). v5 adds n_samps_nl/n_samps_l (exact
-%   complex-sample count read from each capture) AND flips the cross-
-%   correlation convention to D.*conj(R), so the v5 phase columns are the
-%   negation of v1-v4 (values are NOT comparable to older CSVs except by
-%   negation).
-%
-% Schema v6 (2026-07-17) adds session_id — the UHD-session sentinel used by
-% compute_L2's chain-phase calibration join: the "<YYYYMMDD>/<HHMMSS>" run-
-% folder key (cryosoop layout, one folder == one UHD session), "legacy-flat"
-% (capture at the data root), or "unknown" (fails closed: excluded from chain
-% cal). Unlike v1->v5, v6 is a CSV-only logical migration: existing v5 CSVs
-% are patched in place from a metadata-only disk scan (lib/session_key.m),
-% no raw reprocessing.
+% interrupted run resumes from the last completed batch). Columns include
+% rho_DRL, rho_DRNS, SNR_DNS (Eq. 39a), SNR_RNS (Eq. 39b), P_NS,
+% overflow_flag, nl_peak_lag, l_peak_lag, n_samps_nl, n_samps_l, and
+% session_id. session_id is the run key used by the L2 chain-calibration join.
 %
 % overflow_flag (0/1): set if either file in the NL/L pair was flagged by
 % find_overflows (cfg.overflow_file); such pairs' rho_DRL/rho_DRNS are
-% unreliable. Existing CSVs missing this column are patched in place (no
-% reprocessing). The viewer excludes flagged rows from all plots.
+% unreliable. The viewer excludes flagged rows from all plots.
 %
 
-    % --- RFI excision methods + per-method output dirs (mirror compute_L1) ---
+    % --- Configure RFI methods and output directories ---
     % cfg.rfi_apply_calib gates whether calibration is excised; when false the
     % calibration is computed once (unexcised) into the base dir only.
     methods = cellstr(getfield_default(cfg, 'rfi_methods', {'none'}));
@@ -95,12 +65,10 @@ function compute_calib(cfg)
         end
     end
 
-    % --- Find NL and L captures (ch0 files; ch1 derived per pair) ---
+    % --- Find NL and L captures ---
     % 'UHF__NL_2*' does not match 'UHF__NLs_*' (small sets) — after the
-    % literal 'UHF__NL_' the next char must be '2' (year digit). The '**'
-    % recurses into the cryosoop <YYYYMMDD>/<HHMMSS>/ per-run subfolders while
-    % still matching a legacy flat directory (** matches zero folder levels);
-    % every downstream path is built from each hit's .folder (read_capture).
+    % literal 'UHF__NL_' the next character must be a year-leading '2'. '**'
+    % covers both run folders and captures stored directly in cfg.data_dir.
     nl_ch0 = dir(fullfile(cfg.data_dir, '**', 'UHF__NL_2*_ch0.dat'));
     l_ch0  = dir(fullfile(cfg.data_dir, '**', 'UHF__L_2*_ch0.dat'));
 
@@ -113,12 +81,10 @@ function compute_calib(cfg)
     nl_bases = string(erase({nl_ch0.name}', '_ch0.dat'));
     l_bases  = string(erase({l_ch0.name}',  '_ch0.dat'));
 
-    % --- Session identity (schema v6): one cryosoop run folder == one UHD
-    %     session. Sentinels per capture (lib/session_key.m): the validated
-    %     "<YYYYMMDD>/<HHMMSS>" key, "legacy-flat" (data-root capture), or
-    %     "unknown" (fails closed downstream). The base->sentinel maps feed
-    %     the v6 in-place CSV patch below; a base name found in more than one
-    %     distinct session is ambiguous -> "unknown". ---
+    % --- Assign UHD session identity ---
+    % Run-folder captures use a validated "<YYYYMMDD>/<HHMMSS>" key; captures
+    % at the data root use "legacy-flat". Ambiguous bases use "unknown" and
+    % fail closed in the L2 chain-calibration join.
     dr        = dir(cfg.data_dir);
     root_fold = string(dr(1).folder);          % data_dir as dir() spells it
     nl_sids   = arrayfun(@(h) session_key(h.folder, root_fold), nl_ch0);
@@ -130,9 +96,7 @@ function compute_calib(cfg)
                  '"unknown" (excluded from chain cal).\n'], n_ambig);
     end
 
-    % --- Incremental update + schema upkeep, PER METHOD ---
-    % Per-method incremental (same pattern as compute_L1); old-schema CSVs in
-    % any method dir are archived and reprocessed under v5.
+    % --- Validate each method's schema and collect processed NL bases ---
     done_nl = cell(nM, 1);
     for mi = 1:nM
         done_nl{mi} = strings(0, 1);
@@ -147,13 +111,11 @@ function compute_calib(cfg)
                    oc, ME.message);
         end
         if ismember('n_samps_nl', prev.Properties.VariableNames)
-            % v5 schema (adds n_samps_nl/n_samps_l, D.*conj(R) convention):
-            % up to date, continue incrementally.
+            % Required sample-count fields are present; continue incrementally.
             done_nl{mi} = prev.nl_base;
         elseif ismember('nl_peak_lag', prev.Properties.VariableNames)
-            % v4 (nl_peak_lag but no n_samps_nl). v5 also flips the cross-
-            % correlation convention to D.*conj(R), so the archived phase
-            % columns cannot be back-patched — reprocess all pairs.
+            % Missing sample counts identify phase-incompatible output;
+            % archive it and recompute every pair.
             stamp = string(datetime('now', 'Format', 'yyyyMMdd'));
             archived = strrep(oc, '.csv', "_v4_" + stamp + ".csv");
             movefile(oc, archived);
@@ -182,7 +144,7 @@ function compute_calib(cfg)
         end
     end
 
-    % --- Patch existing calib CSV(s) if overflow_flag column is missing ---
+    % --- Add overflow_flag to append-incompatible CSVs from capture metadata ---
     for mi = 1:nM
         oc = out_calib{mi};
         if ~isfile(oc), continue; end
@@ -208,14 +170,10 @@ function compute_calib(cfg)
         end
     end
 
-    % --- Patch existing calib CSV(s) if session_id column is missing (v6) ---
-    % Schema v6 = v5 + session_id, a CSV-only logical migration (numeric values
-    % unchanged, NO raw reprocessing): map each row's nl_base AND l_base to the
-    % on-disk session sentinel and require agreement. Rows whose captures are
-    % no longer on disk, map ambiguously, or disagree between NL and L become
-    % "unknown" (excluded from chain cal downstream — fail closed). Atomic:
-    % temp file + rename. A patch failure is a HARD ERROR: appending v6 rows to
-    % an unmigrated CSV would misalign columns.
+    % --- Add session_id to append-incompatible CSVs from capture metadata ---
+    % NL and L must map to the same session; missing, ambiguous, or mismatched
+    % pairs become "unknown" and fail closed in L2. Replace atomically and stop
+    % on failure before appending any rows.
     for mi = 1:nM
         oc = out_calib{mi};
         if ~isfile(oc), continue; end
@@ -245,16 +203,11 @@ function compute_calib(cfg)
         end
     end
 
-    % --- Group all cal captures into runs, then rank-pair NL<->L per run ---
-    % Runs are keyed by containing folder when captures live in per-run
-    % subfolders (cryosoop <YYYYMMDD>/<HHMMSS>/ layout); when every capture
-    % shares one folder (legacy flat season) runs are split on inter-capture
-    % time gaps > run_gap_sec. Cron cal runs are ~2 h apart, while a single
-    % run's NL+L span is <= ~120 s (new 4NL+4L) or <= ~35 s (old 2NL+2L), so a
-    % 20 min gap cleanly separates runs. Within each run the k-th NL pairs with
-    % the k-th L (chronological), reproducing the old positional 2+2 pairing and
-    % giving leading/trailing pairs for the new 4+4 sequence.
-    run_gap_sec = 20*60;   % legacy flat-dir run split (cron cadence ~2 h)
+    % --- Group captures into runs and rank-pair NL with L ---
+    % Run folders define sessions. Root-level captures are split at gaps longer
+    % than 20 min, safely below the approximately 2 h calibration cadence.
+    % Observed run spans are <=~120 s for 4NL+4L and <=~35 s for 2NL+2L.
+    run_gap_sec = 20*60;   % flat-layout run split (s)
 
     nl_ts = base_timestamps(nl_bases);
     l_ts  = base_timestamps(l_bases);
@@ -276,13 +229,8 @@ function compute_calib(cfg)
         all_ts(bad_ts)   = []; all_fold(bad_ts) = [];
     end
 
-    % Assign a run id to every remaining capture — PER CAPTURE, so mixed
-    % layouts are safe (corrected 2026-07-17: the previous dataset-wide
-    % folder-count branch would have rank-paired an entire flat legacy season
-    % as one run whenever any per-run subfolder was also present). Captures in
-    % per-run subfolders group by exact containing folder (a cryosoop folder
-    % IS a UHD session); root-level (legacy flat) captures are independently
-    % split on time gaps > run_gap_sec, exactly like the retired tree.
+    % Assign runs per capture so folder and flat layouts can coexist. Each
+    % non-root folder is one UHD session; root captures use the gap split.
     is_root = (all_fold == root_fold);
     run_id  = zeros(numel(all_ts), 1);
     if any(~is_root)
@@ -403,18 +351,14 @@ end
 
 % =========================================================================
 function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
-% Compute calibration quantities for one NL–L pair (Eqs. 23–40), once per RFI
-% method. Returns rows = 1xnumel(methods) cell (one calib row per method, same
-% order) or all-empty if the pair is unreadable; per-method degenerate pairs
-% are skipped (that cell stays []).
+% Compute Eqs. 23–40 for one NL–L pair and each RFI method.
+% rows follows methods order; unreadable or degenerate products remain empty.
 %
 % Excision is done in the frequency domain: the lag-0 products (Eqs. 24-27) are
 % formed directly from the excised spectra via Parseval —
 % mean(e_d.*conj(e_r)) == sum(F_Dm.*conj(F_Rm))/N^2 — so no ifft round-trip is
-% needed and the Eq. 24-40 math below is unchanged. 'none' uses the raw signals
-% (no FFT). Cross-correlations use the D.*conj(R) order (direct = ch0,
-% reflected = ch1), unified with compute_L1 as of schema v5 — the v1-v4
-% R.*conj(D) order negated every phase.
+% needed. 'none' uses the raw signals without an FFT. Cross-correlations use
+% D.*conj(R) (direct = ch0, reflected = ch1), matching compute_L1.
 %
 % Variables follow theory doc notation:
 %   E_DNS, E_RNS — noise+load signals, direct (D) and reflected (R) channels
@@ -434,16 +378,14 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
     [E_DL, E_RL, ok_l] = read_capture(job.l, job.l_base, cfg.min_bytes);
     if ~ok_l, return; end
 
-    % v5: exact complex-sample count read (post length-match) from each capture.
-    % Shared across methods (raw read, independent of RFI excision).
+    % Record exact complex-sample counts after matching channel lengths.
     n_samps_nl = numel(E_DNS);
     n_samps_l  = numel(E_DL);
 
     % Excision operators + spectra (only when a non-none method is requested).
     % Per-calibration-state bands: NL captures use cfg.rfi_bands_nl, L uses
     % cfg.rfi_bands_l (rfi_prepare_bands swaps cfg.rfi_bands per state; an empty
-    % list for a state -> pass-through, so that state runs unexcised). NL/L no
-    % longer share the signal band list.
+    % list for a state -> pass-through, so that state runs unexcised).
     Pn = []; Pl = []; F_DNS = []; F_RNS = []; F_DL = []; F_RL = [];
     if any(~strcmp(methods, 'none'))
         bands_nl = getfield_default(cfg, 'rfi_bands_nl', zeros(0,2));
@@ -481,11 +423,9 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
 
     for mi = 1:nMeth
         m = methods{mi};
-        % Cross-correlations at lag=0 and channel powers (Eqs. 24–27). Both use
-        % the D.*conj(R) order (direct = ch0, reflected = ch1) to match
-        % compute_L1 (schema v5; v1-v4 used R.*conj(D), which negated the phase).
-        % 'none' uses the raw time series; the excised methods form the SAME
-        % lag-0 products directly from the excised spectra (Parseval:
+        % Cross-correlations at lag=0 and channel powers (Eqs. 24–27) use
+        % D.*conj(R) (direct = ch0, reflected = ch1). 'none' uses the raw time
+        % series; excised methods form the same products by Parseval:
         % mean(e_d.*conj(e_r)) == sum(F_Dm.*conj(F_Rm))/N^2) with no ifft
         % round-trip.
         if strcmp(m, 'none')
@@ -534,8 +474,7 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
         rho_DRL  = abs(C_RDL)  / sqrt(P_DL  * P_RL);    % Eq. 38
         rho_DRNS = abs(C_RDNS) / sqrt(P_DNS * P_RNS);
 
-        % Field order keeps the v3 columns in place (their 'none' values stay
-        % byte-identical) with the v4 peak-lag columns appended at the end.
+        % Keep append-patched fields at the end of the table schema.
         row = struct();
         row.timestamp        = ts;
         row.nl_base          = job.nl_base;
@@ -560,12 +499,11 @@ function rows = process_calib_pair(job, cfg, overflow_set, methods, apply_rfi)
         row.SNR_DNS          = SNR_DNS;
         row.SNR_RNS          = SNR_RNS;
         row.overflow_flag    = ovf;
-        row.nl_peak_lag      = nl_lags(mi);   % v4: measured NL ch0xch1 argmax lag
-        row.l_peak_lag       = l_lags(mi);    % v4: measured L  ch0xch1 argmax lag
-        row.n_samps_nl       = n_samps_nl;    % v5: complex samples read from NL capture
-        row.n_samps_l        = n_samps_l;     % v5: complex samples read from L capture
-        row.session_id       = job.session_id; % v6: UHD-session sentinel (LAST —
-                                               % matches the in-place column patch)
+        row.nl_peak_lag      = nl_lags(mi);   % measured NL ch0xch1 argmax lag (samples)
+        row.l_peak_lag       = l_lags(mi);    % measured L ch0xch1 argmax lag (samples)
+        row.n_samps_nl       = n_samps_nl;    % complex samples read from NL capture
+        row.n_samps_l        = n_samps_l;     % complex samples read from L capture
+        row.session_id       = job.session_id; % Keep last to match metadata-only patches.
         rows{mi} = row;
     end
 end
@@ -628,18 +566,17 @@ end
 
 % =========================================================================
 function lags = peak_lags_all(ch0, ch1, npts, num_segs, lag_half_win, methods, apply_rfi, P)
-% Integer argmax lag (samples) of the Hanning-windowed, segment-averaged
+% Integer argmax lag (samples) of the Hann-windowed, segment-averaged
 % cross-correlation R = fftshift(ifft(F0.*conj(F1)))/npts over +-lag_half_win,
 % one value per RFI method. F0/F1 are computed once per segment and each
-% method's excision is applied before the cross-spectrum — identical to
-% compute_L1's process_pair. ch0 = direct, ch1 = reflected (matches the signal
-% sign convention). Returns NaN(s) if fewer than one full segment is available.
+% method's excision is applied before the cross-spectrum. ch0 = direct and
+% ch1 = reflected, matching compute_L1. Returns NaN without a full segment.
     nMeth  = numel(methods);
     lags   = nan(1, nMeth);
     n_segs = min(floor(min(numel(ch0), numel(ch1)) / npts), num_segs);
     if n_segs == 0, return; end
     npos = (0:npts-1)';
-    win  = 0.5 * (1 - cos(2*pi*npos / (npts-1)));   % Hanning, matches compute_L1
+    win  = 0.5 * (1 - cos(2*pi*npos / (npts-1)));   % Hann window, matching compute_L1
     R = repmat({zeros(npts, 1)}, 1, nMeth);
     for s = 1:n_segs
         i1 = (s-1)*npts + 1;  i2 = s*npts;
@@ -669,9 +606,8 @@ end
 
 % =========================================================================
 function [ub, us, n_ambig] = base_sid_map(bases, sids)
-% Unique base -> session-sentinel map for the schema-v6 CSV patch. A base
-% name observed with more than one distinct sentinel (duplicate captures in
-% different session folders) is ambiguous -> "unknown".
+% Map each unique base to a session sentinel; duplicates across sessions are
+% ambiguous and map to "unknown".
     [ub, ~, ic] = unique(bases);
     us = strings(size(ub));
     for k = 1:numel(ub)
@@ -683,7 +619,7 @@ end
 
 
 function s = sid_of(bases, map_b, map_s)
-% Sentinel lookup for CSV rows; bases not on disk any more -> "unknown".
+% Look up persisted bases; captures absent from disk map to "unknown".
     s = repmat("unknown", numel(bases), 1);
     [tf, loc] = ismember(bases, map_b);
     s(tf) = map_s(loc(tf));

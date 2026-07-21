@@ -493,7 +493,7 @@ function test_e2e_stale_output_invalidated(tc)
         'stale product still loadable under the canonical name');
     stale = dir(fullfile(d, 'BrundageSoOp_sigma0_stale_*.csv'));
     verifyEqual(tc, numel(stale), 1, 'exactly one _stale_ file expected');
-    % The renamed file preserves the original finite product (data not lost).
+    % The renamed file preserves the finite product data.
     OUTs = readtable(fullfile(d, stale(1).name), 'TextType', 'string');
     verifyEqual(tc, OUTs.Properties.VariableNames, sigma0_schema());
     verifyTrue(tc, any(isfinite(OUTs.sigma0_app_lin_fixed_h)));
@@ -521,7 +521,7 @@ function test_e2e_calib_absent_products_nan(tc)
     verifyTrue(tc, all(isnan(OUT.sigma0_app_lin_fixed_h)));
     verifyTrue(tc, all(isnan(OUT.sigma0_app_lin_snow_h)));
     verifyTrue(tc, all(isnan(OUT.gamma_lin)));
-    % Geometry columns remain finite (all captures now have valid geometry).
+    % Geometry columns remain finite because every capture has valid geometry.
     verifyTrue(tc, all(isfinite(OUT.theta_deg)));
     verifyTrue(tc, all(isfinite(OUT.range_km)));
     verifyTrue(tc, all(isfinite(OUT.r_d_m)));
@@ -592,7 +592,7 @@ function test_e2e_family_band_fd_vs_fdmuos(tc)
 % family changes. The MUOS band is narrower (lower noise floor -> higher DSNR),
 % so P_dsig is placed at the geometric mean of the two families' 10 dB break
 % points: fd lands BELOW the guard, fd_muos ABOVE — a discriminating flag flip
-% that the pre-fix MUOS-bandwidth-for-fd bug would get wrong.
+% that using MUOS bandwidth for the full-band fd family would get wrong.
     t0 = datetime(2026,1,1,0,0,0);
     off_h = (0:4)';
     N = numel(off_h);
@@ -649,7 +649,7 @@ end
 
 
 % =========================================================================
-% N. Ratio-estimator bias + noise-floor validation (disposition 8, pure math)
+% N. Ratio-estimator bias and noise-floor validation
 % =========================================================================
 function test_ratio_estimator_bias_montecarlo(tc)
 % The direct-referenced observable c_hat = C / P_dsig is a RATIO estimator. With

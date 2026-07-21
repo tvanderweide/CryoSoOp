@@ -34,9 +34,8 @@ function [bands_hz, source, channel] = rfi_propose_bands(freq_hz, psd0_db, psd1_
     env0 = movmedian(psd0_db, w);
     env1 = movmedian(psd1_db, w);
 
-    % Per-channel gate flags, kept separate so each band can be attributed to the
-    % channel(s) that triggered it. The merged flag preserves the previous union
-    % semantics exactly: sk_flag = sk0_flag | sk1_flag == max(sk0,sk1) >= threshold.
+    % Keep channel flags separate for attribution. The merged SK gate is
+    % sk0_flag | sk1_flag, equivalent to max(sk0,sk1) >= threshold.
     psd0_flag = (psd0_db - env0 >= p.excess_db);
     psd1_flag = (psd1_db - env1 >= p.excess_db);
     if p.use_sk

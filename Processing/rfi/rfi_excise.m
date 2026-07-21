@@ -136,7 +136,7 @@ end
 
 % =========================================================================
 function d = method_out_dir(base, method)
-% Output directory for a method: 'none' -> base (production v3 path),
+% Output directory for a method: 'none' -> base,
 % 'notch_interp' -> <base>_notch. Keeps each method's products self-contained
 % so every downstream stage runs unchanged.
     b = char(base);

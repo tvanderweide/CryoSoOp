@@ -1,5 +1,5 @@
 function sid = session_key(folder, root_folder)
-% Session-identity sentinel for a capture's containing folder (schema v6).
+% Return the UHD session sentinel for a capture's containing folder.
 %
 % The cryosoop acquisition contract makes one <DATA_ROOT>/<YYYYMMDD>/<HHMMSS>/
 % run folder == one UHD session (DataCollection/README.md), so the folder is
@@ -7,8 +7,8 @@ function sid = session_key(folder, root_folder)
 % Returns one of:
 %   "<YYYYMMDD>/<HHMMSS>"  capture in a shape-validated per-run subfolder of
 %                          the data root (cryosoop layout)
-%   "legacy-flat"          capture directly in the data root (legacy flat
-%                          season) — time-gap run grouping applies downstream
+%   "legacy-flat"          capture directly in the data root; time-gap run
+%                          grouping applies downstream
 %   "unknown"              anything else (unexpected nesting or folder shape)
 %                          — fails closed downstream: no chain calibration
 %

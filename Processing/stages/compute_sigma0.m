@@ -2,10 +2,10 @@ function compute_sigma0(cfg)
 % Sigma0: direct-referenced radar-equation calibration (apparent normalized
 % bistatic radar cross section sigma0 + coherent power reflectivity Gamma).
 %
-% Theory doc IIP-SoOpSAR-processing-equations §2.2, Eqs. 41-42. Fixed-tower
-% configuration; footprint from the first Fresnel zone (Larson & Nievinski
-% 2013). "Direct-referenced" (a la Shah et al. 2017): the per-capture complex
-% correlation C is normalized by the measured direct-channel power P_dsig so
+% IIP-SoOpSAR-processing-equations §2.2, Eqs. 41-42; first-Fresnel-zone
+% footprint from Larson & Nievinski (2013). Following Shah et al. (2017), the
+% direct-referenced per-capture complex correlation C is normalized by the
+% measured direct-channel power P_dsig so
 % the (time-varying, power-controlled) MUOS EIRP and the wavelength cancel and
 % only gain RATIOS survive. The observable is
 %       c_hat = C / P_dsig     (dimensionless),
@@ -24,10 +24,9 @@ function compute_sigma0(cfg)
 %     sigma0 bias is therefore NOT guaranteed; Gamma has no such variance term
 %     and is predominantly biased LOW by the noisy denominator. dsnr_db (the
 %     true signal/noise ratio, see below) and c_var_noise_est are emitted as
-%     per-row diagnostics of the two effects; a validated noise subtraction is
-%     future work (the absolute calib P_DN is not trusted for subtraction —
-%     only the G_De/G_Re ratio is robust — and the notch noise bandwidth is
-%     operator-dependent).
+%     per-row diagnostics. P_DN is used for the SNR guard but not subtracted;
+%     only G_De/G_Re is treated as robust, and notch noise bandwidth depends on
+%     the selected operator.
 %   * Coherent-mean removal is done in c_hat space (NOT on prefactor-scaled
 %     samples), then per-capture prefactors multiply each squared residual;
 %     geometry/gain are therefore applied per capture, before the window
@@ -54,18 +53,18 @@ function compute_sigma0(cfg)
 %     Fresnel footprint both assume this).
 %
 % RECOMPUTE-FULL: the centered sliding window means a newly appended capture
-% changes earlier rows' window membership, so this stage is NOT incremental —
+% changes other rows' window membership, so this stage is not incremental —
 % it recomputes every row each run and ATOMICALLY overwrites the output (write a
 % temp CSV in the same dir, then movefile over the destination). The math is
 % cheap (CSV-only), so a full recompute is inexpensive. STALE-OUTPUT GUARD:
-% when a prerequisite is unmet (missing L1/L2/elev table, pre-channel-power L1
-% schema, empty join) the stage cannot recompute, so any EXISTING output CSV is
+% when a prerequisite is unmet (missing L1/L2/elevation table, required L1
+% columns, or joined rows), the stage cannot recompute, so any existing CSV is
 % renamed aside (_stale_<yyyyMMdd_HHmmss>) rather than left in place — a
 % recompute-full product must never be silently consumable when its inputs are
 % gone. A missing calib CSV is NOT a prerequisite failure (see INPUTS).
 %
 % INPUTS (all in cfg.out_dir, the per-method product dir):
-%   BrundageSoOp_L1_sig.csv  (must carry the channel-power schema, pow_ch0_*),
+%   BrundageSoOp_L1_sig.csv  (requires channel-power fields pow_ch0_*),
 %   BrundageSoOp_L2.csv      (theta_deg + chain-calibrated phase, overflow-free),
 %   BrundageSoOp_calib.csv   (G_De, G_Re, P_DN; OPTIONAL — a method dir without
 %                             calib still yields a product with NaN gains,
@@ -76,9 +75,8 @@ function compute_sigma0(cfg)
 %   out_dir, freq_hz, fs, Ti, num_segs, tower_h_m, muos_bands, capture_tz,
 %   elev_table, and (all via getfield_default so the stage runs standalone):
 %   sigma0_corr_family (default 'fd_muos'; also 'fd', 'td'),
-%   sigma0_cal_max_age_hr (default 1.0 h; matches compute_L2's 60-min
-%       LEGACY gap-join tolerance — session-keyed chain joins there have no
-%       time limit), sigma0_win_hours (24), sigma0_min_count (5),
+%   sigma0_cal_max_age_hr (default 1.0 h), sigma0_win_hours (24),
+%   sigma0_min_count (5),
 %   sigma0_min_elev_deg (5), sigma0_min_dsnr_db (10),
 %   ant_gain_direct_dbi (2), ant_gain_reflected_dbi (2). The direct antenna is
 %   RHCP and the reflected LHCP; both are the co-pol expected signal, so no
@@ -165,7 +163,7 @@ function compute_sigma0(cfg)
         return;
     end
 
-    % --- Read L1 / L2, check schema --------------------------------------
+    % --- Read L1/L2 and validate required fields --------------------------
     L1 = read_stamped(l1_csv);
     L2 = read_stamped(l2_csv);
     if ~ismember('pow_ch0_fd_muos', L1.Properties.VariableNames)
@@ -260,7 +258,7 @@ function compute_sigma0(cfg)
 
     % --- Calibration join (nearest calib run within tolerance) -----------
     min_elev = getfield_default(cfg, 'sigma0_min_elev_deg', 5);
-    cal_tol_hr = getfield_default(cfg, 'sigma0_cal_max_age_hr', 1.0);  % = L2 legacy gap join 60 min
+    cal_tol_hr = getfield_default(cfg, 'sigma0_cal_max_age_hr', 1.0);  % nearest-calibration tolerance (h)
     if isfile(calib_csv)
         [G_De, G_Re, P_DN, cal_age_s, flag_cal_missing] = ...
             join_calib(calib_csv, t, cal_tol_hr);
@@ -500,16 +498,15 @@ end
 
 % =========================================================================
 function v = getfield_default(s, name, default)
-% cfg field with a fallback when absent/empty (same helper as compute_L2).
+% Return a cfg field or its fallback when absent or empty.
     if isfield(s, name) && ~isempty(s.(name)), v = s.(name); else, v = default; end
 end
 
 
 % =========================================================================
 function t_utc = to_utc(t, cfg)
-% Convert naive capture timestamps (cfg.capture_tz timebase) to naive UTC —
-% verbatim from compute_L2 so the elevation-table interpolation shares one time
-% convention. Exact identity when capture_tz is 'UTC' or absent.
+% Convert naive capture timestamps from cfg.capture_tz to naive UTC for
+% elevation-table interpolation. UTC or an absent zone is an identity mapping.
     if isfield(cfg, 'capture_tz') && ~isempty(cfg.capture_tz)
         t.TimeZone = cfg.capture_tz;
         t.TimeZone = 'UTC';

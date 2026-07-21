@@ -196,7 +196,7 @@ function soop_viewer_render_raw(V, kind)
             f_mhz = (D.f + cfg.freq_hz) / 1e6;
             dB0 = 10*log10(D.P0);
             dB1 = 10*log10(D.P1);
-            % Thin raw traces (faded ~25% darker than the original pastel so
+            % Thin raw traces use a ~25% darker pastel so
             % they're visible against a white background), thick
             % median-smoothed envelopes on top in fully-saturated b/r.
             plot(ax, f_mhz, dB0, 'Color', [0.3 0.45 0.75 0.45], 'LineWidth', 0.5);
@@ -382,8 +382,8 @@ function [ch0, ch1] = rr_load_capture(V, base)
     cfg = V.cfg;
     M = V.M;
     n_want = V.n_want;
-    % Resolve the capture's actual folder (cryosoop per-run subfolder or the
-    % old flat season dir) rather than assuming cfg.data_dir.
+    % Resolve the capture's run folder or flat data root rather than assuming
+    % every file lives directly in cfg.data_dir.
     folder = rr_folder_for(V, base);
     p0 = fullfile(folder, base + "_ch0.dat");
     p1 = fullfile(folder, base + "_ch1.dat");
@@ -442,7 +442,7 @@ function [near_base, near_ts] = rr_nearest_capture(V, ctype, ref_ts)
     near_ts   = NaT;
     if ~isfolder(cfg.data_dir), return; end
     % Recursive '**' scan so the nearest Signal/NL/L capture is found across the
-    % per-run subfolders (cryosoop) or the flat season (old data). Record each
+    % run subfolders or the flat data root. Record each
     % scanned capture's folder so rr_load_capture can resolve the picked file
     % even though it may be out of the current date range / another run folder.
     d = dir(fullfile(cfg.data_dir, '**', CAP_PATTERNS.(ctype)));

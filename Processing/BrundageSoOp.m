@@ -20,7 +20,7 @@ site = jsondecode(fileread(fullfile(fileparts(which('soop_setup_paths')), ...
 % input_dir holds shared season inputs; out_dir is the dated run root.
 % Products are written to Figures and L1 or a method-specific sibling directory.
 if on_hpc
-    % Supports the 2026 base and updated data-acquisition directory structures.
+    % Supports run-folder and flat capture layouts.
     paths = site.paths.hpc;
 else
     % --- Local cryosoop B210 data --------------------------------------------

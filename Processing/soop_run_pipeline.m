@@ -1,10 +1,7 @@
 function soop_run_pipeline(cfg, toggles)
 % Run the Brundage SoOp processing pipeline for one cfg and a set of toggles.
-%
-% Extracted verbatim from the BrundageSoOp.m entry script so the same dispatch
-% logic can be driven programmatically (verification harness) and from the
-% user-facing entry alike. The entry script builds cfg and toggles, then calls
-% this; the viewer is launched by the entry, not here.
+% Supports programmatic runs; BrundageSoOp.m builds cfg/toggles and launches the
+% interactive viewer separately.
 %
 %   soop_run_pipeline(cfg, toggles)
 %
@@ -17,8 +14,8 @@ function soop_run_pipeline(cfg, toggles)
 %   toggles.run_rfi    - compute_rfi_spectrum    (season RFI diagnostic + bands)
 %   toggles.run_sigma0 - compute_sigma0          (apparent sigma0 + coherent reflectivity)
 %
-% Behaviour matches the original entry: L1 + calib process every cfg.rfi_methods
-% entry in a single read/FFT pass; the downstream stages (snr, sat-id, L2) are
+% L1 + calib process every cfg.rfi_methods entry in a single read/FFT pass;
+% downstream stages (snr, sat-id, L2) are
 % RFI-unaware and run once per method dir, overriding only cm.out_dir.
 
 %% Parallel pool (only when processing; the viewer doesn't need workers)
@@ -37,7 +34,7 @@ if any([toggles.run_L1, toggles.run_calib, toggles.run_snr, toggles.run_rfi]) &&
         % Job-unique pool metadata dir — concurrent MATLAB jobs sharing the
         % default ~/.matlab location corrupt each other's pool state.
         % Root comes from site_config.json (paths.hpc.matlab_jobs) via
-        % cfg.matlab_jobs_dir; the literal fallback keeps old cfg structs working.
+        % cfg.matlab_jobs_dir; the literal fallback supports cfg without that field.
         if isfield(cfg, 'matlab_jobs_dir')
             jobs_root = cfg.matlab_jobs_dir;
         else

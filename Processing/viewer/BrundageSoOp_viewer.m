@@ -37,16 +37,14 @@ function BrundageSoOp_viewer(cfg)
     % only by the expected-thermal-phase-noise floor in the Calib rho-phase views.
     % The lag-0 mean (compute_calib.m) runs over the ENTIRE capture (read_capture
     % reads the full file), so N_L = fs * T_capture (~2 s), NOT fs*Ti*num_segs.
-    % This is the pre-load DEFAULT; load_csvs (soop_viewer_data.m) refines it from
-    % the exact per-capture complex-sample counts when the schema-v5 calib CSV
-    % carries n_samps_nl / n_samps_l, and falls back to this nominal for older
-    % (pre-v5) CSVs. notch/butterworth sets drop bins => effective N_L is slightly
+    % load_csvs replaces this default with exact n_samps_nl/n_samps_l counts
+    % when present. notch/butterworth sets drop bins, so effective N_L is slightly
     % lower (second-order; documented, not modeled).
     V.calib_N_looks = cfg.fs * 2;        % ~ 4e7 (20 MHz x 2 s)
 
     V.Erfi = rfi_excise();
 
-    % ---- State shared by module callbacks (orig S-init block) ----
+    % ---- State shared by module callbacks ----
     V.L1   = table();      % L1 CSV (sorted by timestamp)
     V.CAL  = table();      % calib CSV
     V.cache = struct('key', "", 'data', []);   % last raw-capture computation
@@ -72,8 +70,8 @@ function BrundageSoOp_viewer(cfg)
     V.D  = soop_viewer_data();
     V.CB = soop_viewer_callbacks();
 
-    % ---- Product dirs (orig row-2 init) ----
-    V.base_out_dir  = cfg.out_dir;                              % original (base) product dir
+    % ---- Product directories ----
+    V.base_out_dir  = cfg.out_dir;                              % base product directory
     V.rfi_dir       = V.U.cfgdef(V, 'input_dir', V.base_out_dir);   % Static: season-wide RFI products
     V.notch_out_dir = V.Erfi.method_out_dir(cfg.out_dir, 'notch_interp');
 

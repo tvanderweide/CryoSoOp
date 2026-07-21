@@ -29,7 +29,7 @@ end
 
 function test_sign_convention(tc)
     % ch1 = ch0 .* exp(-1i*phi0) means D leads R by phi0; the D.*conj(R)
-    % convention (schema v5+, compute_calib C_RDNS) must measure +phi0.
+    % convention used by compute_calib C_RDNS must measure +phi0.
     % Scaling ch1 must not change phi or rho (rho == 1 for exact copies).
     U   = tc.TestData.U;
     ch0 = carrier(4096);
@@ -177,7 +177,7 @@ end
 
 
 function test_title_rule(tc)
-    % Title states (user spec 2026-07-20): numbers appear ONLY while the
+    % Title states: numbers appear only while the
     % correction is applied; switch on with unusable correlation says n/a;
     % switch off shows the bare capture name.
     U = tc.TestData.U;

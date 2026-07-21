@@ -1,29 +1,15 @@
 function compute_rfi_spectrum(cfg)
-% Season-aggregated RFI spectra + proposed excision bands (frequency-domain),
-% one product set per dataset: Signal, NL (noise+load), and L (load-only).
+% Aggregate season-wide RFI spectra and propose frequency-domain excision bands.
+% Produces separate products for Signal, NL (noise+load), and L (load-only).
 %
-% Persistent narrowband RFI at Brundage shows as spikes standing above the
-% smoothed PSD envelope in essentially every capture. This tool aggregates
-% across an even season-wide sample of each dataset's captures and reports,
-% per FFT bin and per channel: mean PSD (dB); OCCUPANCY (PRIMARY) — fraction
-% of captures whose PSD exceeds a per-capture movmedian baseline by
-% cfg.rfi_excess_db (robust to the colored receiver response; matches the
-% by-eye PSD-vs-envelope method); spectral kurtosis (CHECK, reported not
-% gating) — SK = (M+1)/(M-1)*(M*S2/S1^2 - 1), thermal noise -> 1, RFI
-% deviates, catches intermittent/buried RFI the mean hides; and ch0xch1
-% coherence — |<X0 X1*>|^2 / (<|X0|^2><|X1|^2>), marks the coherent signal
-% region to PROTECT.
+% Per-bin diagnostics are mean PSD (dB), occupancy above the movmedian envelope,
+% spectral kurtosis SK=(M+1)/(M-1)*(M*S2/S1^2-1), and ch0xch1 coherence
+% |<X0 X1*>|^2/(<|X0|^2><|X1|^2>). Occupancy and coherence are diagnostic only.
 %
-% Candidate bands come from rfi_propose_bands (the shared band-finder): bins
-% whose mean PSD exceeds the smoothed envelope by >= cfg.rfi_excess_db, UNION
-% bins with spectral kurtosis >= cfg.rfi_sk_threshold (when cfg.rfi_use_sk),
-% outside the protected region, merged into [f_lo,f_hi]. The SK gate applies
-% to the Signal dataset only — NL/L band-finding is PSD-excess only (SK is
-% still computed and written as a diagnostic). (Occupancy is computed and
-% written to the CSV for offline inspection but is diagnostic-only — it does
-% NOT gate the proposed bands.) The user confirms the bands from the figure
-% before curating them into the per-dataset band CSV (the defensibility
-% safeguard): rfi_bands.csv (Signal), rfi_bands_NL.csv, rfi_bands_L.csv.
+% rfi_propose_bands unions PSD-excess bins with optional spectral-kurtosis bins,
+% excludes the protected region, and merges runs into [f_lo,f_hi]. The SK gate
+% applies only to Signal. Confirm proposed bands before curating rfi_bands.csv,
+% rfi_bands_NL.csv, or rfi_bands_L.csv.
 %
 % Not incremental — recomputes and overwrites on each run.
 % Outputs (cfg.input_dir, the Static folder), per dataset with suffix
@@ -80,9 +66,8 @@ function aggregate_dataset(ds, bp, ap)
 % filename pattern, output suffix, and band-finder SK gate differ.
 
     % --- Discover + evenly subsample this dataset's season captures ---
-    % '**' recurses into the cryosoop <YYYYMMDD>/<HHMMSS>/ per-run subfolders
-    % while still matching a legacy flat directory (** matches zero levels);
-    % one_capture builds each partner path from the hit's .folder.
+    % '**' covers both run folders and captures stored directly in data_dir;
+    % one_capture builds each partner path from the discovered folder.
     ch0_files = dir(fullfile(ap.data_dir, '**', ds.pat));
     if isempty(ch0_files)
         fprintf('[rfi:%s] No %s in %s — skipped.\n', ds.name, ds.pat, ap.data_dir);
@@ -111,18 +96,13 @@ function aggregate_dataset(ds, bp, ap)
     OCC0 = zeros(L,1); OCC1 = zeros(L,1);
     Mtot = 0; Ncap = 0;
 
-    % --- Deterministic season aggregation -------------------------------------
-    % A parfor reduction (A0 = A0 + a0) folds the workers' partial sums in
-    % completion order, so the season spectra were bit-nondeterministic between
-    % runs. Instead each capture writes its per-capture spectra into a disjoint
-    % COLUMN of a per-chunk slice buffer (a sliced output — order-independent),
-    % then a SERIAL, fixed-order reduction sums the chunk (sum(...,2)) and folds
-    % chunks in ascending order — bit-reproducible for a given capture set.
+    % --- Aggregate captures in deterministic chunks ---
+    % Each capture writes a disjoint slice; serial fixed-order reduction makes
+    % results bit-reproducible for a fixed capture set.
     % Peak extra memory is bounded by one chunk buffer: chunk_sz*L doubles per
     % real stat (7) plus complex X01 (2x), e.g. seg_len=2^16 (nbins) and
     % chunk_sz=64 is ~0.3 GB — vs ~2.3 GB to hold all rfi_max_captures (500)
-    % captures at once. (Holding the full nbins*captures slice for every stat is
-    % the memory bound noted in the task; the chunking keeps peak use modest.)
+    % captures at once.
     files = ch0_files;  bnames = bases;
     n_read = ap.n_read;  excess_db = bp.excess_db;  base_khz = ap.base_khz;  df = ap.df;
     chunk_sz = min(nC, 64);

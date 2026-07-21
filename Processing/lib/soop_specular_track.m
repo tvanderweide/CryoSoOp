@@ -4,9 +4,8 @@ function [series, meta] = soop_specular_track(cfg, WX, norad, pinned_day, t0, t1
 % Computes the locus of specular points x_sp = h/tan(e) over ONE day for a
 % single satellite, in local ENU meters about the antenna. Flat, horizontal
 % reflector assumed (same model as the Fresnel footprint; no DEM). This is the
-% data half of the viewer's 'Radar Cal: specular track' display, split out so
-% day selection, timezone handling, and snow interpolation are testable
-% without a uifigure.
+% data half of the viewer's 'Radar Cal: specular track' display. It keeps day
+% selection, timezone handling, and snow interpolation independent of the UI.
 %
 % INPUTS
 %   cfg         needs elev_dir, tower_h_m; optional capture_tz (elevation
@@ -146,8 +145,8 @@ function [series, meta] = soop_specular_track(cfg, WX, norad, pinned_day, t0, t1
         if ~isempty(WX) && all(ismember({'timestamp', 'depth_m'}, ...
                                         WX.Properties.VariableNames)) ...
                 && any(isfinite(WX.depth_m))
-            % Production compute_sigma0 semantics: keep EVERY unique-timestamp
-            % row as an interpolation node, NaN depths included, so an invalid
+            % Keep every unique-timestamp row as an interpolation node, including
+            % NaN depths, so an invalid
             % SNOdar block poisons its intervals (NaN through the block, line
             % breaks) instead of being bridged by its finite neighbors.
             wok = ~isnat(WX.timestamp);

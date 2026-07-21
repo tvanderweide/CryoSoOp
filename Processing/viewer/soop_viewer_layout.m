@@ -1,7 +1,5 @@
 function soop_viewer_layout(V)
-% Build the viewer uifigure (4-row grid + side panel) and wire every control
-% to a module callback capturing only V. Verbatim widget layout from the
-% original; product-dir init moved to the shell.
+% Build the viewer uifigure and wire controls to callbacks that capture V.
     S = V;
     cfg = V.cfg;
     COMPARE_DATASET = V.COMPARE_DATASET;
@@ -274,7 +272,7 @@ function soop_viewer_layout(V)
     S.snr_row.Visible = 'off';
 
     % Y-scale switch — shown only for 'Calib: Cross-correlation amplitudes'.
-    % Log (default, current behaviour) keeps the ~10x load-to-noise-source
+    % Log (default) keeps the ~10x load-to-noise-source
     % separation legible; Linear shows the raw ADC^2 magnitude.
     ampscale_row = uigridlayout(info_gl, [1 2]);
     ampscale_row.ColumnWidth = {54, 'fit'};

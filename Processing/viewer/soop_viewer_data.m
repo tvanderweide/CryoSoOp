@@ -21,14 +21,13 @@ function load_csvs(V)
     S.WX   = M.load_snodar(cfg);
 
     % Independent looks N_L for the calib lag-0 cross-correlation thermal
-    % phase-noise floor (sigma_phi). Schema v5 stores the EXACT per-capture
+    % phase-noise floor (sigma_phi). When available, use the exact per-capture
     % complex-sample counts read per NL/L pair (n_samps_nl / n_samps_l); the
     % defensible per-pair look count is min(n_samps_nl, n_samps_l). The floor
     % consumers (rc_phase_noise_plot uses per-BIN mean rho; looks_curve_plot
     % takes a median) all reduce N_L to a single scalar, so a representative
     % scalar — the median per-pair look count — is used here rather than
-    % per-row counts. Fall back to the nominal B*T (~ cfg.fs * 2 s) for a pre-v5
-    % CSV that predates these columns (columns absent => tolerated gracefully).
+    % per-row counts. Without these columns, use nominal B*T (~cfg.fs * 2 s).
     S.calib_N_looks = cfg.fs * 2;
     if ~isempty(S.CAL) && all(ismember({'n_samps_nl', 'n_samps_l'}, ...
             S.CAL.Properties.VariableNames))
@@ -120,12 +119,11 @@ function [dlt, ok, why] = chaincal_delta(V, TT)
     % Per-row chain-phase correction wrap180(phase_corr_cal_deg -
     % phase_corr_deg) from the active product dir's L2 CSV, joined to TT by
     % base_name (== -phase_chain_deg: the NL-only angle(C_RDNS) session
-    % mean since 2026-07-20, subtracted in full — the sign the L2 runtime
-    % applies; identical for all phase domains, so one delta serves
+    % mean subtracted in full by L2; identical for all phase domains, so one delta serves
     % sinc/fd/muos columns).
     % Rows without an L2 match or with NaN chain phase get NaN (dropped
     % from the plot rather than silently left uncorrected). ok=false with a
-    % message when the L2 CSV predates the chain-cal schema.
+    % message when the L2 CSV lacks chain-calibration columns.
     dlt = nan(height(TT), 1);
     ok  = false;
     why = ['Chain-cal needs phase_corr_cal_deg in BrundageSoOp_L2.csv ' ...
@@ -143,11 +141,9 @@ end
 
 
 function ph = chain_phase_col(Tin)
-    % Per-pair leak-cancelled receiver chain phase angle(C_RDNS - C_RDL),
-    % degrees — DIAGNOSTIC only since 2026-07-20: the applied L2 correction
-    % is the NL-only angle(C_RDNS) session mean (chain_phase_runs in
-    % compute_L2.m); this leak-cancelled series remains so the accepted
-    % leak term stays observable (compare against C_RDNS_phase_deg).
+    % Per-pair leak-cancelled receiver chain phase angle(C_RDNS - C_RDL), deg.
+    % Diagnostic only: L2 applies the NL-only angle(C_RDNS) session mean. Compare
+    % this series with C_RDNS_phase_deg to inspect the correlated leak term.
     z = Tin.C_RDNS_amp .* exp(1i * deg2rad(Tin.C_RDNS_phase_deg)) ...
       - Tin.C_RDL_amp  .* exp(1i * deg2rad(Tin.C_RDL_phase_deg));
     ph = rad2deg(angle(z));

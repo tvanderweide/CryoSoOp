@@ -1,7 +1,7 @@
 function tests = viewer_swe_phaseline_test
 % Tests for the L2: Candidates SWE overlay + phaseLine toggle: load_snodar's
-% snow-scale SWE QC chain (error-code mask, spike/support filter, schema
-% quadrants, cfg.wx_swe_cols override, row alignment), the pure wx_right_axis
+% snow-scale SWE QC chain (error-code mask, spike/support filter, optional-column
+% combinations, cfg.wx_swe_cols override, row alignment), the pure wx_right_axis
 % helper, and the graphics assumptions the render relies on (LineStyle
 % toggling, overlay color separation, row-1 pixel budget).
 % Run: matlab -batch "soop_setup_paths; addpath('tests'); runtests('viewer_swe_phaseline_test')"
@@ -604,7 +604,7 @@ function test_snrcut_empty_state_predicate(tc)
     verifyFalse(tc, isempty(win), 'window still holds the off-time row');
     verifyTrue(tc, isempty(sel(Tf)), 'filtered selection is empty');
     % => hint must fire (unfiltered sel nonempty), though the window is not
-    % empty — the render now keys the hint on exactly this comparison.
+    % empty — the render keys the hint on exactly this comparison.
 end
 
 function TC = subset_sel(U, T, t0, t1, tgt, W)
@@ -652,7 +652,8 @@ function test_is_cand_kind(tc)
 end
 
 function test_catalog_sensor_data_entry(tc)
-    % Exactly one renamed entry, the old name gone, PLOT_MATH row attached.
+    % The catalog contains one Sensor data entry, no obsolete candidate-raw
+    % label, and an attached PLOT_MATH row.
     cfg = struct('freq_hz', 370e6, 'fs', 20e6, 'num_segs', 2, 'Ti', 0.9, ...
                  'peak_lag', -0.575, 'T_load_K', 290);
     [PI, ~] = soop_viewer_catalog(cfg);
@@ -677,10 +678,10 @@ function test_hour_bins(tc)
 end
 
 function test_fringe_latch_state_machine(tc)
-    % Provenance-tracked field latch: auto populates/updates the display
+    % Auto/manual field latch: auto populates/updates the display
     % but passes the UNROUNDED value; manual text is never clobbered and
     % wins even over NaN auto; invalid manual falls back to the auto VALUE
-    % without flipping provenance; NaN auto blanks an auto-mode field.
+    % without changing ownership; NaN auto blanks an auto-mode field.
     U = tc.TestData.U;
     A = U.fringe_latch('', [], 364.71);          % first render, no UserData
     verifyEqual(tc, A.text, '365');
@@ -714,7 +715,7 @@ end
 % -------------------------------------------------- graphics assumptions
 
 function test_right_ruler_visibility(tc)
-    % The 2d fix contract: in yyaxis mode the right ruler can be hidden and
+    % In yyaxis mode the right ruler can be hidden and
     % restored via YAxis(2).Visible without disturbing the left side.
     fig = figure('Visible', 'off');
     cleanup = onCleanup(@() close(fig));

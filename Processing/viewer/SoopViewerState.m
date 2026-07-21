@@ -1,15 +1,10 @@
 classdef SoopViewerState < handle
-% Explicit shared state for the split BrundageSoOp_viewer.
-%
-% One handle object replaces the parent-scope `S` struct + the loose locals
-% (cfg, M, Erfi, npts, ...) of the original single-function viewer. Property
-% names are preserved from the original `S.*` fields so the module bodies stay
-% a mechanical `S.` -> `V.` (via a `S = V;` alias) rewrite. All viewer modules
-% take this object as their first argument.
+% Shared mutable state for BrundageSoOp_viewer modules and callbacks.
+% All viewer modules receive this handle object as their first argument.
 
     properties (Constant)
-        % Sentinel ItemsData values for the two synthetic Dataset entries (not
-        % real product dirs). Verbatim from the original viewer.
+        % Sentinel ItemsData values for synthetic Dataset entries that do not
+        % represent product directories.
         COMPARE_DATASET  = '__compare_base_notch__';
         CHAINCAL_DATASET = '__notch_chaincal__';
     end
@@ -36,7 +31,7 @@ classdef SoopViewerState < handle
         % char keys). Under the cryosoop layout captures live in per-run
         % subfolders <data_root>/<YYYYMMDD>/<HHMMSS>/; the recursive discovery
         % records each capture's actual folder here so rr_load_capture reads
-        % from the right place. Old flat-season data maps base -> data_dir.
+        % from the right place. Flat-layout captures map base -> data_dir.
         cap_folders
 
         % ---- module handle structs ----
