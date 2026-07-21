@@ -2,8 +2,10 @@ function U = soop_viewer_util()
 % UI/label/formatting helpers for BrundageSoOp_viewer. Returns a struct of
 % handles (same idiom as rfi_excise/BrundageSoOp_fun); each takes V first
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
-% parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/src_desc/
-% open_fun).
+% parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/freeze_spans/
+% wx_right_axis/snrcut_usable/snrcut_apply/snrcut_start/wx_temp_labels/
+% swe_per_fringe_mm/fringe_pick/fringe_latch/theory_overlay/is_cand_kind/
+% hour_bins/src_desc/open_fun).
     U.range_bounds = @range_bounds;
     U.apply_overrides = @apply_overrides;
     U.style_legend = @style_legend;
@@ -34,6 +36,18 @@ function U = soop_viewer_util()
     U.phoff_measure = @phoff_measure;
     U.phoff_prep = @phoff_prep;
     U.phoff_title = @phoff_title;
+    U.freeze_spans = @freeze_spans;
+    U.wx_right_axis = @wx_right_axis;
+    U.snrcut_usable = @snrcut_usable;
+    U.snrcut_apply = @snrcut_apply;
+    U.snrcut_start = @snrcut_start;
+    U.wx_temp_labels = @wx_temp_labels;
+    U.swe_per_fringe_mm = @swe_per_fringe_mm;
+    U.fringe_pick = @fringe_pick;
+    U.fringe_latch = @fringe_latch;
+    U.theory_overlay = @theory_overlay;
+    U.is_cand_kind = @is_cand_kind;
+    U.hour_bins = @hour_bins;
     U.src_desc = @src_desc;
     U.open_fun = @open_fun;
 end
@@ -330,7 +344,7 @@ end
 
 
 function y = wrap_deg(y)
-    % Wrap degrees to (-180, 180].
+    % Wrap degrees to [-180, 180): mod-based, so exactly +180 maps to -180.
     y = mod(y + 180, 360) - 180;
 end
 
@@ -402,8 +416,58 @@ function tf = plot_uses_domain(kind)
         'L1: Phase time series', 'L1: Amplitude time series', ...
         'L1: Phase vs SNR scatter', 'L1: Diurnal phase pattern', ...
         'L1: Within-run phase scatter'};
-    tf = any(strcmp(kind, domain_plots)) || startsWith(kind, 'L2: Candidates') ...
+    tf = any(strcmp(kind, domain_plots)) || is_cand_kind(kind) ...
          || startsWith(kind, 'L2: Diurnal');
+end
+
+
+function tf = is_cand_kind(kind)
+% The satellite-candidates figure family: the two MUOS candidate views plus
+% 'L2: Sensor data' (renamed 2026-07-21 from 'L2: Candidates — raw (no
+% correction)'). One predicate so the render dispatch, the side-panel
+% control visibility, and the Phase-domain gating can never disagree.
+    tf = startsWith(kind, 'L2: Candidates') || strcmp(kind, 'L2: Sensor data');
+end
+
+
+function h = hour_bins(t)
+% Nearest hour of day (0..23) per timestamp, for the hour-coloring scatter:
+% rounds the clock time to the closest whole hour, wrapping 23:31-23:59 to
+% hour 0. NaT -> NaN. Shape follows the input.
+    h = mod(round(hour(t) + minute(t) / 60 + second(t) / 3600), 24);
+    h(isnat(t)) = NaN;
+end
+
+
+function A = fringe_latch(txt, ud, auto_mm)
+% Provenance-tracked state machine for the theoretical mm-per-fringe field.
+% Inputs: the field's current text, its UserData provenance struct (may be
+% empty on first use), and the geometry-computed auto rate (may be NaN when
+% geometry is unavailable). Returns struct A:
+%   .text — what the field should display (programmatic write; never flips
+%           provenance): the auto rate formatted %.0f while is_auto, blank
+%           while is_auto with NaN auto, the user's text verbatim otherwise
+%   .ud   — updated provenance {is_auto, last_auto_text, last_auto_mm}
+%   .mm   — the ACTIVE rate for the overlay: the UNROUNDED auto value while
+%           is_auto (display rounding must not change the physics), else
+%           fringe_pick(text, auto) so invalid manual text falls back to
+%           the auto VALUE without silently flipping provenance
+% is_auto itself is owned by the edit callback (user typed nonempty →
+% manual; cleared → auto); this latch only refreshes display/value.
+    if ~(isstruct(ud) && isfield(ud, 'is_auto'))
+        ud = struct('is_auto', true, 'last_auto_text', '', 'last_auto_mm', NaN);
+    end
+    ud.last_auto_mm = auto_mm;
+    if ud.is_auto
+        if isfinite(auto_mm) && auto_mm > 0
+            ud.last_auto_text = sprintf('%.0f', auto_mm);
+        else
+            ud.last_auto_text = '';
+        end
+        A = struct('text', ud.last_auto_text, 'ud', ud, 'mm', auto_mm);
+    else
+        A = struct('text', txt, 'ud', ud, 'mm', fringe_pick(txt, auto_mm));
+    end
 end
 
 
@@ -780,5 +844,291 @@ function tstr = phoff_title(base, phi, rho, sw_on)
                        base, dash);
     else
         tstr = char(base);
+    end
+end
+
+
+function spans = freeze_spans(t, y)
+% Above-freezing spans for the wet-snow band overlay: contiguous runs of
+% samples with y > 0 (STRICT) become [start end] datetime intervals padded
+% by half the sampling interval on each side. Pure and testable. Contract
+% (2026-07-20 plan gate):
+%   - t (datetime) and y must have equal length; both are canonicalized to
+%     sorted columns. Rows with NaT timestamps are dropped.
+%   - Rows with non-finite y are KEPT as cold separators — a present-but-
+%     invalid sample always breaks a band.
+%   - Sampling interval dt = median of the POSITIVE time diffs of the full
+%     kept stream (duplicate timestamps contribute no zero diffs;
+%     minutes(15) fallback when no positive diff exists), capped at 1 hour
+%     so a sparse outage can never masquerade as the cadence — bands never
+%     pad more than 30 min past a sample nor bridge gaps over 1.5 h.
+%   - Runs additionally split at sample gaps > 1.5*dt (a missed scheduled
+%     sample splits; exactly 1.5*dt does not), so bands never bridge
+%     station outages.
+%   - Returns NaT(0,2) when nothing qualifies.
+    t = t(:);
+    y = y(:);
+    if numel(t) ~= numel(y)
+        error('soop_viewer_util:freeze_spans:length', ...
+              'freeze_spans: t and y must have equal length.');
+    end
+    keep = ~isnat(t);
+    t = t(keep);
+    y = y(keep);
+    [t, ord] = sort(t);
+    y = y(ord);
+    if isempty(t), spans = NaT(0, 2); return; end
+    dd = diff(t);
+    dd = dd(dd > 0);
+    if isempty(dd), dt = minutes(15); else, dt = min(median(dd), hours(1)); end
+    hot = isfinite(y) & y > 0;
+    if ~any(hot), spans = NaT(0, 2); return; end
+    gap = [false; diff(t) > 1.5 * dt];   % gap(i): outage between i-1 and i
+    is_start = hot & ([true; ~hot(1:end-1)] | gap);
+    is_end   = hot & [~hot(2:end) | gap(2:end); true];
+    spans = [t(is_start) - dt/2, t(is_end) + dt/2];
+end
+
+
+function R = wx_right_axis(show_dep, show_swe, dep_m, swe_mm)
+% Right-axis plan for the L2: Candidates depth/SWE overlay. Depth-only
+% keeps today's meters ruler; whenever SWE is shown the shared ruler is in
+% MILLIMETERS (the papers' SWE unit) and depth joins as mm via dep_factor,
+% so one ruler serves both (0-4000 mm depth vs 0-1400 mm SWE, same order).
+% Pure and testable. Returns struct R:
+%   .active     — right axis drawn at all (either series shown)
+%   .label      — 'Snow depth (m)' / 'SWE [mm]' / 'Snow depth / SWE [mm]'
+%   .color      — ruler color: depth red when depth-only (today's look),
+%                 neutral dark whenever SWE is shown
+%   .dep_factor — multiply depth_m by this before plotting (1 in meters
+%                 mode, 1000 in mm mode)
+%   .pad        — unit-aware ylim padding (0.1 m / 100 mm) — the render's
+%                 upper limit is R.ymax*1.1 + R.pad
+%   .ymax       — max over the SHOWN series, in AXIS units (NaN when none
+%                 finite)
+    R.active = show_dep || show_swe;
+    if show_dep && show_swe
+        R.label = 'Snow depth / SWE [mm]';
+    elseif show_swe
+        R.label = 'SWE [mm]';
+    else
+        R.label = 'Snow depth (m)';
+    end
+    if show_swe
+        R.color = [0.2 0.2 0.2];  R.dep_factor = 1000;  R.pad = 100;
+    else
+        R.color = [0.8 0 0];      R.dep_factor = 1;     R.pad = 0.1;
+    end
+    vals = [];
+    if show_dep, vals = [vals; dep_m(:) * R.dep_factor]; end
+    if show_swe, vals = [vals; swe_mm(:)]; end
+    R.ymax = max(vals, [], 'omitnan');
+    if isempty(R.ymax), R.ymax = NaN; end
+    % The render's lower limit is pinned at 0, so a negative-only series
+    % (QC can retain a stable negative SWE) must not produce a decreasing
+    % ylim — clamp the finite maximum to >= 0 ([0, pad] ruler).
+    if isfinite(R.ymax), R.ymax = max(R.ymax, 0); end
+end
+
+
+function mm = swe_per_fringe_mm(freq_hz, theta_inc_deg)
+% SWE change per 360° of differential reflected phase (one fringe), in mm.
+% From R. Shah, X. Xu, S. Yueh, C. S. Chae, K. Elder, B. Starr, and
+% Y. Kim, "Remote Sensing of Snow Water Equivalent Using P-Band Coherent
+% Reflection," IEEE Geoscience and Remote Sensing Letters, vol. 14, no. 3,
+% pp. 309-313, Mar. 2017, doi:10.1109/LGRS.2016.2636664 — Eq. (6):
+% dphi = (a/cos(theta_inc)) * f * SWE, i.e. phase rate
+% scales with f/cos(theta_inc), so
+%   SWE_fringe(f, theta) = 606 mm * (260 MHz / f) * cos(theta)/cos(43°).
+% Calibration anchor: §II of that paper — "at 260 MHz and 43° incidence,
+% ~606 mm of SWE per 360°" (the user-selected reference model; the same
+% paper's §IV multilayer model gives ~530 mm/fringe and its experimental
+% regression ~504 — different model outputs, recorded here, not used).
+% Guards: f must be a real positive finite numeric scalar; theta_inc a real
+% numeric scalar in [0, 90) degrees (negative incidence rejected). Invalid
+% input returns NaN (fail closed — the overlay simply doesn't draw).
+    SWE_FRINGE_REF_MM = 606;      % mm per fringe at the reference point
+    F_REF_HZ          = 260e6;    % reference frequency
+    THETA_REF_DEG     = 43;       % reference incidence angle
+    ok = isnumeric(freq_hz) && isscalar(freq_hz) && isreal(freq_hz) && ...
+         isfinite(freq_hz) && freq_hz > 0 && ...
+         isnumeric(theta_inc_deg) && isscalar(theta_inc_deg) && ...
+         isreal(theta_inc_deg) && isfinite(theta_inc_deg) && ...
+         theta_inc_deg >= 0 && theta_inc_deg < 90;
+    if ~ok, mm = NaN; return; end
+    mm = SWE_FRINGE_REF_MM * (F_REF_HZ / double(freq_hz)) * ...
+         (cosd(double(theta_inc_deg)) / cosd(THETA_REF_DEG));
+end
+
+
+function [mm, manual] = fringe_pick(txt, auto_mm)
+% Active SWE-per-fringe rate for the theoretical overlay: the side-panel
+% override field wins when it parses to a positive finite number, else the
+% geometry-computed auto value. Pure and testable. manual reports which one
+% won (the legend shows the active rate either way).
+    v = str2double(strtrim(txt));
+    manual = isfinite(v) && isreal(v) && v > 0;
+    if manual, mm = v; else, mm = auto_mm; end
+end
+
+
+function O = theory_overlay(cand_t, cand_phi, wx_t, wx_swe, mode, fringe_mm)
+% Theoretical differential-phase overlay for the L2: Candidates figures:
+% the snow-scale SWE record converted to phase via the fringe rate, anchored
+% to a MEASURED phase reference so it overlays the plotted points (the
+% measured phase carries arbitrary chain offsets — a zero-at-anchor curve
+% would float unrelated to the data). Pure and testable; the render draws
+% O.t/O.phi_deg only when O.ok.
+%   cand_t/cand_phi — DISPLAYED candidate times and phases (post SNR/TOD/
+%                     range selection, timestamp-sorted; NaN phases allowed)
+%   wx_t/wx_swe     — the FULL weather record (times must be sorted; the
+%                     season-level anchor must not move with the date range)
+%   mode            — 'swe0' (snow-free start) | 'first' (first shown)
+%   fringe_mm       — swe_per_fringe_mm output
+% Contract:
+%   phi(t) = wrap180(phase_ref + 360*(SWE(t) - SWE_anchor)/fringe_mm) at
+%   EVERY non-NaT weather timestamp — O.t keeps the full chronology and
+%   invalid-SWE rows return NaN phase, so the drawn line BREAKS across
+%   sensor/QC gaps instead of bridging them. Raw 15-min curve in every agg
+%   mode (never aggregated), paper-positive sign (legend labels it).
+%   'swe0': SWE_anchor = first run of 4 consecutive VALID |SWE| <= 10 mm
+%   samples that also spans <= 2 h of clock time (true 1-h support at the
+%   15-min cadence: an invalid row or a timestamp gap splits the run;
+%   rejects negatives beyond +-10 and isolated lows); no such run ->
+%   record-start fallback (first valid sample) with O.anchor_note =
+%   ', record-start anchor' (user-accepted, made visible). phase_ref =
+%   finite displayed phase nearest the anchor time, <= 7 days.
+%   'first': phase_ref = first finite displayed phase; SWE_anchor = nearest
+%   valid SWE sample to that capture, <= 2 h.
+%   Any missing piece — including mismatched cand_t/cand_phi or
+%   wx_t/wx_swe lengths — -> O.ok = false with O.why (never an error,
+%   except an unknown mode, a caller bug:
+%   soop_viewer_util:theory_overlay:mode).
+    O = struct('ok', false, 'why', '', 't', [], 'phi_deg', [], 'anchor_note', '');
+    if ~any(strcmp(mode, {'swe0', 'first'}))
+        error('soop_viewer_util:theory_overlay:mode', ...
+              'theory_overlay: unknown mode "%s".', mode);
+    end
+    if ~(isnumeric(fringe_mm) && isscalar(fringe_mm) && isreal(fringe_mm) && ...
+         isfinite(fringe_mm) && fringe_mm > 0)
+        O.why = 'no valid fringe rate'; return;
+    end
+    wx_t = wx_t(:);  wx_swe = double(wx_swe(:));
+    cand_t = cand_t(:);  cand_phi = double(cand_phi(:));
+    if numel(wx_t) ~= numel(wx_swe) || numel(cand_t) ~= numel(cand_phi)
+        O.why = 'mismatched input lengths'; return;
+    end
+    % Full weather chronology (non-NaT only); validity mask per row.
+    keep = ~isnat(wx_t);
+    tw = wx_t(keep);  sw = wx_swe(keep);
+    val = isfinite(sw);
+    fin_c = ~isnat(cand_t) & isfinite(cand_phi);
+    if ~any(val), O.why = 'no finite SWE samples'; return; end
+    if ~any(fin_c), O.why = 'no finite displayed phase'; return; end
+    tcnd = cand_t(fin_c);  pcnd = cand_phi(fin_c);
+    n = numel(tw);
+    if strcmp(mode, 'swe0')
+        % Run test on the UNCOMPRESSED rows: 4 consecutive valid near-zero
+        % samples whose clock span is <= 2 h (movsum shrinks at the tail,
+        % so short records simply find no run and take the fallback).
+        nearz = val & abs(sw) <= 10;
+        i0 = [];
+        if n >= 4
+            cnt = movsum(nearz, [0 3]);
+            cand_i = find(nearz(1:n-3) & cnt(1:n-3) == 4 & ...
+                          (tw(4:n) - tw(1:n-3)) <= hours(2), 1);
+            if ~isempty(cand_i), i0 = cand_i; end
+        end
+        if isempty(i0)
+            i0 = find(val, 1);             % record-start fallback (visible)
+            O.anchor_note = ', record-start anchor';
+        end
+        t_anchor = tw(i0);  swe_anchor = sw(i0);
+        [dmin, ic] = min(abs(tcnd - t_anchor));
+        if dmin > days(7)
+            O.why = 'no displayed phase near the snow-free anchor'; return;
+        end
+        phase_ref = pcnd(ic);
+    else                                   % 'first'
+        phase_ref = pcnd(1);
+        dt = abs(tw - tcnd(1));
+        dt(~val) = seconds(Inf);           % anchor only on valid samples
+        [dmin, iw] = min(dt);
+        if dmin > hours(2)
+            O.why = 'no SWE sample near the first shown capture'; return;
+        end
+        swe_anchor = sw(iw);
+    end
+    O.t = tw;
+    O.phi_deg = nan(n, 1);
+    O.phi_deg(val) = wrap_deg(phase_ref + 360 * (sw(val) - swe_anchor) / fringe_mm);
+    O.ok = true;
+end
+
+
+function ok = snrcut_usable(T)
+% True when the candidates table can be SNR-filtered for display: a nonempty
+% table with a real numeric snr_db column. Drives the side-panel spinner's
+% Enable state — a disabled spinner means the loaded candidate product
+% predates the snr_db column and must be regenerated to filter.
+    ok = ~isempty(T) && istable(T) && ...
+         ismember('snr_db', T.Properties.VariableNames) && ...
+         isnumeric(T.snr_db) && isreal(T.snr_db);
+end
+
+
+function [T, ok] = snrcut_apply(T, cut)
+% Display SNR cutoff, the EXACT producer predicate (compare_sat_candidates):
+% keep rows with isfinite(snr_db) & snr_db >= cut, row order preserved —
+% NaN and both infinities drop, matching the pipeline's finite-SNR gate.
+% Fail-safe: an unusable table (see snrcut_usable) or an invalid cutoff
+% (non-scalar / non-finite / non-numeric) returns the input unchanged with
+% ok = false; never an operator error.
+    ok = snrcut_usable(T) && isnumeric(cut) && isscalar(cut) && ...
+         isreal(cut) && isfinite(cut);
+    if ~ok, return; end
+    T = T(isfinite(T.snr_db) & T.snr_db >= cut, :);
+end
+
+
+function v = snrcut_start(cfg)
+% Validated starting value for the SNR-cutoff spinner: cfg.snr_threshold
+% (the producer's scoring floor) when it is a real finite numeric scalar,
+% else 10 (the pipeline default). Note this is the CONFIGURED cutoff — the
+% candidates CSV carries no threshold provenance, so a file produced under
+% a different setting differs from this starting value.
+    v = 10;
+    if isfield(cfg, 'snr_threshold')
+        t = cfg.snr_threshold;
+        if isnumeric(t) && isscalar(t) && isreal(t) && isfinite(t)
+            v = double(t);
+        end
+    end
+end
+
+
+function [L, full] = wx_temp_labels(cfg)
+% Display strings for the two temperature overlays — the ONE source of
+% truth for both the row-1 checkbox Text and the render legend entries.
+% Defaults to the Brundage headers; cfg.wx_temp_cols overrides per site
+% (blank entries keep their default — the same per-entry fallback
+% load_snodar applies, so the label always names the column actually
+% loaded). `full` returns the untruncated names for tooltips. Long names
+% are MIDDLE-truncated to 13 display chars (first 6 + '…' + last 6) — the
+% layout policy bounding the row-1 'fit' columns within the 1500 px budget
+% (pinned by the worst-case replica test) while keeping the distinguishing
+% suffixes station schemes put at the end (..._2m_Avg vs ..._Srf_Avg).
+    L = {'AirTC_Avg', 'Temp_C_Avg'};
+    if isfield(cfg, 'wx_temp_cols') && numel(cfg.wx_temp_cols) >= 2
+        c = cellstr(cfg.wx_temp_cols);
+        for k = 1:2
+            if ~isempty(strtrim(c{k})), L{k} = strtrim(c{k}); end
+        end
+    end
+    full = L;
+    for k = 1:2
+        if numel(L{k}) > 13
+            L{k} = [L{k}(1:6) char(8230) L{k}(end-5:end)];
+        end
     end
 end

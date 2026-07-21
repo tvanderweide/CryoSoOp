@@ -46,6 +46,8 @@
   "weather": {
     "wx_dat": null,
     "wx_temp_cols": null,
+    "wx_depth_cols": null,
+    "wx_swe_cols": null,
     "wx_tz": null
   }
 }

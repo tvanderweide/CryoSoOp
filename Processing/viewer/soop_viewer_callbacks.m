@@ -16,6 +16,23 @@ function C = soop_viewer_callbacks()
     C.on_gap_slider_changing = @on_gap_slider_changing;
     C.on_gap_slider = @on_gap_slider;
     C.on_gap_field = @on_gap_field;
+    C.on_fringe_edit = @on_fringe_edit;
+end
+
+
+function on_fringe_edit(V)
+% Provenance owner for the theoretical mm-per-fringe field: a user-typed
+% nonempty value is a manual override; clearing the field returns it to
+% auto (repopulated by the render's fringe_latch). Programmatic writes go
+% through the latch and never reach this callback.
+    S = V;
+    ud = S.ef_fringe.UserData;
+    if ~(isstruct(ud) && isfield(ud, 'is_auto'))
+        ud = struct('is_auto', true, 'last_auto_text', '', 'last_auto_mm', NaN);
+    end
+    ud.is_auto = isempty(strtrim(S.ef_fringe.Value));
+    S.ef_fringe.UserData = ud;
+    V.CB.refresh(V);
 end
 
 
@@ -370,13 +387,39 @@ function render_now(V)
             'snow depth). Clear = mean over the top date range.'];
     end
 
-    % Weather-overlay toggles (snow depth + the two temperatures) and the
-    % side-panel daily time-of-day filter row apply only to the L2:
-    % Candidates views.
-    is_cand = startsWith(kind, 'L2: Candidates');
-    set([S.cb_depth, S.cb_airtc, S.cb_tempc], ...
+    % Weather-overlay toggles (snow depth + SWE + the two temperatures) and
+    % the side-panel daily/phaseLine/SNR/theory/fringe/hour rows apply only
+    % to the satellite-candidates family (the two MUOS views + Sensor data).
+    is_cand = V.U.is_cand_kind(kind);
+    set([S.cb_depth, S.cb_swe, S.cb_airtc, S.cb_tempc, S.cb_abvfrz], ...
         'Visible', matlab.lang.OnOffSwitchState(is_cand));
     S.tod_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    S.phline_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    S.snrcut_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    S.theory_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    S.fringe_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    S.hour_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    if is_cand
+        % These overlay panels draw ONE phase column, so the multi-domain
+        % 'Compare all' selection is meaningless here — snap the dropdown to
+        % the fd it would silently resolve to (visible pinning, same idiom
+        % as the Raw: Phase Offset NL snap; the dropdown stays enabled).
+        if strcmp(V.U.domain_mode(V), 'compare')
+            S.dd_domain.Value = 'fd';
+        end
+        % Hour coloring keeps hour identity only without the daily filter
+        % and under Raw captures / Per-run mean; the render re-checks the
+        % same predicate, so a checked-but-disabled box draws nothing.
+        hour_ok = ~S.cb_tod.Value && ...
+                  any(strcmp(S.dd_agg.Value, {'Raw captures', 'Per-run mean'}));
+        S.cb_hourcolor.Enable = matlab.lang.OnOffSwitchState(hour_ok);
+    end
+    if is_cand
+        % The spinner works only when the loaded candidate product carries
+        % snr_db (S.CAND follows the Dataset dropdown, so re-check every
+        % render). Disabled = old product; regenerate to filter.
+        S.sp_snrcut.Enable = matlab.lang.OnOffSwitchState(V.U.snrcut_usable(S.CAND));
+    end
 
     % Expand the RFI control row for both season RFI views. The interactive
     % explorer ('RFI: Season spectrum') uses every control; the

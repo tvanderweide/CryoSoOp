@@ -9,19 +9,26 @@ function soop_viewer_layout(V)
     PLOT_INFO = V.PLOT_INFO;
     cfgdef = @(varargin) V.U.cfgdef(V, varargin{:});
     % ---- Figure & layout ----
-    S.fig = uifigure('Name', 'Brundage SoOp Viewer', 'Position', [80 80 1200 720]);
+    % 1500 px wide: row 1 declares 15 columns (10 fixed = 946 px + 14 gaps
+    % at 5 px + five fit-width weather checkboxes ~450 px) and must fit at
+    % the initial size — see the r1 budget note below.
+    S.fig = uifigure('Name', 'Brundage SoOp Viewer', 'Position', [80 80 1500 720]);
     gl = uigridlayout(S.fig, [4 1]);
     V.gl = gl;
     gl.RowHeight = {38, 38, 0, '1x'};   % row 3 = RFI explorer controls, collapsed by default
     gl.Padding   = [8 8 8 8];
 
-    % Row 1 — plot type, aggregation, date range, action buttons, temp toggles
-    % 13 children (10 controls + 3 weather checkboxes) — the grid must declare
-    % all 13 columns, or the extras wrap onto an auto-added second row that
+    % Row 1 — plot type, aggregation, date range, action buttons, wx toggles
+    % 15 children (10 controls + 5 weather checkboxes) — the grid must declare
+    % all 15 columns, or the extras wrap onto an auto-added second row that
     % cannot fit in the fixed 38 px outer cell and the whole row clips.
-    r1 = uigridlayout(gl, [1 13]);
+    % Pixel budget at the 1500 px initial width: 946 fixed + 14x5 spacing
+    % + ~450 for the fit checkboxes = ~1466 <= 1484 interior (pinned by the
+    % row-1 replica test in viewer_swe_phaseline_test).
+    r1 = uigridlayout(gl, [1 15]);
     r1.Layout.Row = 1;
-    r1.ColumnWidth = {270, 130, 42, 115, 26, 115, 86, 86, 76, 96, 'fit', 'fit', 'fit'};
+    r1.ColumnWidth = {250, 120, 36, 105, 22, 105, 80, 80, 64, 84, 'fit', 'fit', 'fit', 'fit', 'fit'};
+    r1.ColumnSpacing = 5;
     r1.Padding = [0 0 0 0];
 
     S.dd_plot = uidropdown(r1, 'Items', {PLOT_INFO.name}, 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
@@ -37,13 +44,28 @@ function soop_viewer_layout(V)
     uibutton(r1, 'Text', 'Reload',      'ButtonPushedFcn', @(~,~) V.CB.on_reload(V));
     uibutton(r1, 'Text', 'Export PNG',  'ButtonPushedFcn', @(~,~) V.CB.on_export(V));
     % Weather-overlay toggles for the L2: Candidates views (shown only there):
-    % snow depth + the two station temperatures, each on its own axis.
+    % snow depth + snow-scale SWE (shared right meters axis) + the two
+    % station temperatures (own overlay axis).
     S.cb_depth = uicheckbox(r1, 'Text', 'Snow depth', 'Value', true, ...
                             'ValueChangedFcn', @(~,~) V.CB.refresh(V));
-    S.cb_airtc = uicheckbox(r1, 'Text', 'AirTC_Avg',  'Value', true, ...
+    S.cb_swe   = uicheckbox(r1, 'Text', 'SWE', 'Value', false, ...
                             'ValueChangedFcn', @(~,~) V.CB.refresh(V));
-    S.cb_tempc = uicheckbox(r1, 'Text', 'Temp_C_Avg', 'Value', true, ...
+    % Temperature checkbox labels are the per-site column names (single
+    % source wx_temp_labels, shared with the render legend; long names are
+    % middle-truncated so distinguishing suffixes survive, and the tooltip
+    % carries the full configured header).
+    [wxlab, wxfull] = V.U.wx_temp_labels(cfg);
+    S.cb_airtc = uicheckbox(r1, 'Text', wxlab{1},  'Value', false, ...
+                            'Tooltip', wxfull{1}, ...
                             'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.cb_tempc = uicheckbox(r1, 'Text', wxlab{2}, 'Value', false, ...
+                            'Tooltip', wxfull{2}, ...
+                            'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    % AboveFreezing (wet-snow indicator): the ticked temperature series draw
+    % as one semi-translucent orange band layer over the times ANY of them
+    % is > 0 degC, instead of temperature lines (soop_viewer_render_l2).
+    S.cb_abvfrz = uicheckbox(r1, 'Text', 'AboveFreezing', 'Value', false, ...
+                             'ValueChangedFcn', @(~,~) V.CB.refresh(V));
 
     % Row 2 — Dataset (RFI method) + Phase domain selectors + capture selector.
     % The Dataset dropdown switches the active product dir between the base
@@ -122,10 +144,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [23 1]);
-    % Rows 14/15 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [28 1]);
+    % Rows 19/20 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    % The 28 px control rows are children 1-18 (the run of 28s below), so a
+    % new control row's height entry must be inserted BEFORE the two 56s.
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -276,6 +300,99 @@ function soop_viewer_layout(V)
         'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.tod_row = tod_row;
     S.tod_row.Visible = 'off';
+
+    % phaseLine — shown only on the three 'L2: Candidates' views. Governs the
+    % phase series' connecting line in EVERY aggregation mode: unchecked =
+    % markers only (scatter), checked = markers joined by a line (aggregated
+    % modes keep their error bars either way).
+    phline_row = uigridlayout(info_gl, [1 1]);
+    phline_row.Padding = [0 0 0 0];
+    S.cb_phline = uicheckbox(phline_row, 'Text', 'phaseLine (connect phase points)', ...
+        'Value', false, 'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.phline_row = phline_row;
+    S.phline_row.Visible = 'off';
+
+    % SNR display cutoff — shown only on the three 'L2: Candidates' views.
+    % Filters the DISPLAYED candidates with the producer's exact predicate
+    % (isfinite(snr_db) & snr_db >= cut); rows below the pipeline scoring
+    % threshold never reached the CSV, so lowering below the configured
+    % start is a harmless no-op. Disabled when the loaded candidate product
+    % has no snr_db column (regenerate to enable).
+    snrcut_row = uigridlayout(info_gl, [1 3]);
+    snrcut_row.ColumnWidth = {'fit', 60, 'fit'};
+    snrcut_row.Padding = [0 0 0 0];
+    snrcut_row.ColumnSpacing = 4;
+    uilabel(snrcut_row, 'Text', ['SNR ' char(8805)], 'FontWeight', 'bold');
+    % Limits bracket the validated start on BOTH sides — the pipeline allows
+    % negative thresholds, and construction must never reject the start.
+    snr0 = V.U.snrcut_start(cfg);
+    S.sp_snrcut = uispinner(snrcut_row, ...
+        'Limits', [min(0, floor(snr0)) max(60, ceil(snr0))], ...
+        'Step', 1, 'Value', snr0, 'ValueDisplayFormat', '%g', ...
+        'Tooltip', ['Display-only SNR floor for the candidate points (dB). ' ...
+                    'Raising it can swap a day''s daily-filter pick to the ' ...
+                    'nearest PASSING capture. Values below the processing ' ...
+                    'threshold cannot restore rows absent from the CSV. ' ...
+                    'Disabled = the loaded candidate product has no snr_db ' ...
+                    'column (regenerate to filter).'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    uilabel(snrcut_row, 'Text', 'dB', 'FontWeight', 'bold');
+    S.snrcut_row = snrcut_row;
+    S.snrcut_row.Visible = 'off';
+
+    % Theoretical phase-from-SWE overlay (candidate control block, directly
+    % after the SNR cutoff — NOT the calibration snr_row above). Checkbox
+    % draws the snow-scale SWE record converted to differential phase (the
+    % coherent-reflection paper's Eq. 6 fringe rate, paper-positive sign) on
+    % the phase axis, anchored per the dropdown; drawn only while the SWE
+    % overlay is shown.
+    theory_row = uigridlayout(info_gl, [1 2]);
+    theory_row.ColumnWidth = {'fit', '1x'};
+    theory_row.Padding = [0 0 0 0];
+    theory_row.ColumnSpacing = 4;
+    S.cb_theory = uicheckbox(theory_row, 'Text', 'theoretical', 'Value', false, ...
+        'Tooltip', ['Overlay the theoretical differential phase computed from ' ...
+                    'the snow-scale SWE (paper sign convention). Needs the SWE ' ...
+                    'overlay on, SWE data, and satellite geometry.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.dd_thanchor = uidropdown(theory_row, ...
+        'Items', {'SWE = 0 start', 'First shown'}, 'Value', 'SWE = 0 start', ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.theory_row = theory_row;
+    S.theory_row.Visible = 'off';
+
+    % Manual SWE-per-fringe override for the theoretical overlay (empty =
+    % auto from geometry via swe_per_fringe_mm; any positive number of mm
+    % per 360° wins). The legend always shows the active rate.
+    fringe_row = uigridlayout(info_gl, [1 3]);
+    fringe_row.ColumnWidth = {'fit', '1x', 36};
+    fringe_row.Padding = [0 0 0 0];
+    fringe_row.ColumnSpacing = 4;
+    uilabel(fringe_row, 'Text', ['mm/2' char(960)], 'FontWeight', 'bold', ...
+            'Tooltip', 'SWE change per full fringe (360°) for the theoretical overlay');
+    S.ef_fringe = uieditfield(fringe_row, 'text', 'Placeholder', '(auto)', ...
+        'Tooltip', ['SWE-per-fringe rate (mm per 360°). Auto-populates with ' ...
+                    'the geometry-computed value; type a positive number to ' ...
+                    'override, clear the field to return to auto.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.on_fringe_edit(V));
+    uibutton(fringe_row, 'Text', 'Set', 'ButtonPushedFcn', @(~,~) V.CB.refresh(V));
+    S.fringe_row = fringe_row;
+    S.fringe_row.Visible = 'off';
+
+    % Hour-of-day point coloring — active only while the daily filter is
+    % OFF and the aggregation keeps hour identity (Raw captures / Per-run
+    % mean); the render checks the same predicate, so a checked-but-
+    % disabled box draws nothing.
+    hour_row = uigridlayout(info_gl, [1 1]);
+    hour_row.Padding = [0 0 0 0];
+    S.cb_hourcolor = uicheckbox(hour_row, 'Text', 'Color by hour', 'Value', false, ...
+        'Tooltip', ['Color each phase point by its nearest hour of day ' ...
+                    '(capture timebase; cyclic colormap). Available when the ' ...
+                    'daily filter is off and aggregation is Raw captures or ' ...
+                    'Per-run mean.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.hour_row = hour_row;
+    S.hour_row.Visible = 'off';
 
     % Geometry-series toggles — shown only for 'Radar Cal: geometry (r2c / r1mc /
     % A_eff)'. Each checkbox draws one geometry series: r_2c (= r_d_m) and r_1mc

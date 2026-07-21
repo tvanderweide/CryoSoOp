@@ -2,8 +2,8 @@
 #SBATCH -J BrundageSoOp
 #SBATCH -p cryogars
 #SBATCH -n 1
-#SBATCH -c 32
-#SBATCH -t 24:00:00
+#SBATCH -c 30
+#SBATCH -t 4-00:00:00
 #SBATCH -o /bsuscratch/thomasvanderweide/logs/BrundageSoOp_%j.out
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=thomasvanderweide@boisestate.edu
@@ -24,15 +24,15 @@
 # fprintf batch progress all land in the per-job log. Watch with:
 #   tail -f /bsuscratch/thomasvanderweide/logs/BrundageSoOp_<jobid>.out
 
-echo "[$(date '+%F %T')] BrundageSoOp job ${SLURM_JOB_ID} starting on $(hostname)"
+echo "[$(date '+%F %T')] CryoSoOp job ${SLURM_JOB_ID} starting on $(hostname)"
 
 module load matlab/r2023b || { echo "[$(date '+%F %T')] FATAL: module load matlab/r2023b failed"; exit 1; }
 
 # TODO: confirm Borah deploy path once the cryosoop B210 season is provisioned
-cd /bsuhome/thomasvanderweide/Documents/CryoSoOp/Processing || { echo "[$(date '+%F %T')] FATAL: cd to script dir failed"; exit 1; }
+cd /bsuhome/thomasvanderweide/Documents/BrundageSoOp/Processing || { echo "[$(date '+%F %T')] FATAL: cd to script dir failed"; exit 1; }
 
-echo "[$(date '+%F %T')] launching matlab -batch BrundageSoOp"
-matlab -batch "BrundageSoOp"
+echo "[$(date '+%F %T')] launching matlab -batch CryoSoOp"
+matlab -batch "CryoSoOp"
 status=$?
 echo "[$(date '+%F %T')] matlab exited with status ${status}"
 exit ${status}

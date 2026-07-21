@@ -400,9 +400,17 @@ end
 
 function WX = load_snodar(cfg)
 % Load and clean the Brundage weather station SNOdar data from a Campbell TOA5 file.
-% Returns a table with columns {timestamp (datetime), depth_m, airtc_c, temp_c}.
+% Returns a table with columns {timestamp (datetime), depth_m, airtc_c, temp_c, swe_mm}.
 % The two temperature columns (cfg.wx_temp_cols, default AirTC_Avg / Temp_C_Avg)
-% feed the viewer's toggleable SNOdar-overlay temperature lines.
+% feed the viewer's toggleable SNOdar-overlay temperature lines — or, with the
+% viewer's AboveFreezing box, its orange above-freezing (wet-snow) band layer.
+% swe_mm is the snow-scale SWE (cfg.wx_swe_cols, default SS_SWE_Avg masked by
+% SS_SWE_ErrCode_Avg; mm water column) feeding the viewer's SWE overlay line —
+% error-code-masked (fail closed), spike-filtered, all-NaN when the sensor's
+% value column is absent. Depth reads cfg.wx_depth_cols {distance, snow_depth}
+% (defaults SnoDAR_distance_Avg / SnoDAR_snow_depth_Avg); BOTH depth headers
+% are required — either missing returns an empty WX. All three cfg.wx_*_cols
+% overrides are set per site in BrundageSoOp.m's weather block.
 %
 % Timestamp timebase: when cfg.wx_tz is set (the logger's clock zone — Campbell
 % loggers run FIXED standard time year-round, no DST), timestamps are converted
@@ -428,25 +436,57 @@ function WX = load_snodar(cfg)
     try
         drift_thr = 4.2;    % m — distance + snow_depth above this = drift/config anomaly
         spike_thr = 0.5;    % m — deviation from 97-pt median to flag as spike/dip
+        swe_spike_thr   = 100;  % mm w.c. — SWE deviation from 97-pt median to flag as a
+                                % transient (p99 sample-to-sample noise is 2.1 mm; audit
+                                % 2026-07-20: removes a 13-sample ~110 mm dip-and-recover
+                                % artifact, keeps persistent steps like 2025-04-12 +175 mm)
+        swe_min_support = 13;   % min finite samples in the 97-pt window (~3 h at 15 min)
+                                % — sparser support can make an isolated bad value its
+                                % own median, so such samples are masked instead
 
         fid = fopen(cfg.wx_dat, 'r', 'n', 'UTF-8');
         fgetl(fid);                          % TOA5 station info (skip)
         hdr = strtrim(string(strsplit(string(fgetl(fid)), ',')));
         fgetl(fid);                          % units (skip)
         fgetl(fid);                          % processing types (skip)
-        dist_col  = find(hdr == 'SnoDAR_distance_Avg',   1);
-        depth_col = find(hdr == 'SnoDAR_snow_depth_Avg', 1);
+        % Snow-depth columns {distance, snow_depth} — BOTH required (either
+        % missing returns an empty WX: every weather overlay unavailable).
+        % cfg.wx_depth_cols overrides the two header names per site.
+        depth_cols = {'SnoDAR_distance_Avg', 'SnoDAR_snow_depth_Avg'};
+        if isfield(cfg, 'wx_depth_cols') && numel(cfg.wx_depth_cols) >= 2
+            depth_cols = cfg.wx_depth_cols(1:2);
+        end
+        dist_col  = find(hdr == string(depth_cols{1}), 1);
+        depth_col = find(hdr == string(depth_cols{2}), 1);
         if isempty(dist_col) || isempty(depth_col), fclose(fid); return; end
 
         % Temperature columns for the viewer overlay (no drift/spike filter —
         % those are depth-specific). cfg.wx_temp_cols overrides the two header
         % names in order (airtc_c, temp_c); defaults to air temp + Temp_C_Avg.
+        % Per-entry blank fallback — the same contract wx_temp_labels uses
+        % for the checkbox/legend text, so the label always names the
+        % column actually loaded here.
         temp_cols = {'AirTC_Avg', 'Temp_C_Avg'};
         if isfield(cfg, 'wx_temp_cols') && numel(cfg.wx_temp_cols) >= 2
-            temp_cols = cfg.wx_temp_cols(1:2);
+            tcc = cellstr(cfg.wx_temp_cols);
+            for tk = 1:2
+                if ~isempty(strtrim(tcc{tk})), temp_cols{tk} = strtrim(tcc{tk}); end
+            end
         end
         airtc_col = find(hdr == string(temp_cols{1}), 1);
         tempc_col = find(hdr == string(temp_cols{2}), 1);
+
+        % Snow-scale SWE columns (value, error code) for the viewer overlay —
+        % optional sensor. cfg.wx_swe_cols overrides the two header names in
+        % order {value, errcode}. Value column absent -> swe_mm all-NaN,
+        % silently; value present without its errcode column -> values kept
+        % unmasked, with one partial-schema warning (QC unavailable).
+        swe_cols = {'SS_SWE_Avg', 'SS_SWE_ErrCode_Avg'};
+        if isfield(cfg, 'wx_swe_cols') && numel(cfg.wx_swe_cols) >= 2
+            swe_cols = cfg.wx_swe_cols(1:2);
+        end
+        swe_col    = find(hdr == string(swe_cols{1}), 1);
+        sweerr_col = find(hdr == string(swe_cols{2}), 1);
 
         % Read all fields as strings — handles quoted timestamps, NAN, unquoted numbers.
         n_cols = numel(hdr);
@@ -484,6 +524,27 @@ function WX = load_snodar(cfg)
             warning('BrundageSoOp:snodar', 'Temperature column "%s" not found.', temp_cols{2});
         end
 
+        % SWE (mm w.c.): parse + error-code mask (fail closed). With the
+        % errcode column present, a value is valid ONLY where the errcode is
+        % finite and exactly 0 — a nonzero 15-min average errcode means part
+        % of the window errored (the sensor reads ~0 while erroring, which
+        % would paint false drop-to-zero excursions), and an unknown (NaN)
+        % error state is not trusted either.
+        if isempty(swe_col)
+            swe_num = nan(n_rows, 1);              % optional sensor — silent
+        else
+            swe_num = str2double(strtrim(data(:, swe_col)));
+            swe_num(~isfinite(swe_num)) = NaN;     % normalize ±Inf before QC
+            if isempty(sweerr_col)
+                warning('BrundageSoOp:snodar', ...
+                    'SWE column "%s" present without its error-code column "%s" — values kept unmasked.', ...
+                    swe_cols{1}, swe_cols{2});
+            else
+                swe_err = str2double(strtrim(data(:, sweerr_col)));
+                swe_num(~(isfinite(swe_err) & swe_err == 0)) = NaN;
+            end
+        end
+
         % Calibration drift: flag rows where distance + snow_depth exceeds threshold.
         drift_mask = (dist_num + depth_num) > drift_thr;
         depth_num(drift_mask | ~isfinite(depth_num)) = NaN;
@@ -494,6 +555,7 @@ function WX = load_snodar(cfg)
         depth_num = depth_num(keep);
         airtc_num = airtc_num(keep);
         tempc_num = tempc_num(keep);
+        swe_num   = swe_num(keep);
 
         % Weather logger clock -> capture timebase (see header). Brundage logger
         % zone is 'Etc/GMT+7' — POSIX sign convention: Etc/GMT+7 IS UTC-7. An
@@ -522,8 +584,20 @@ function WX = load_snodar(cfg)
         ref = movmedian(depth_num, 97, 'omitnan');
         depth_num(abs(depth_num - ref) > spike_thr) = NaN;
 
-        WX = table(ts, depth_num, airtc_num, tempc_num, ...
-            'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c'});
+        % SWE spike + support filter (same deviation idiom). The median tracks
+        % monotone runs, so interior melt/accumulation staircases and lasting
+        % steps survive; isolated blips are masked. At the record boundary the
+        % window shrinks one-sided, so a steep ramp right at the ends CAN be
+        % flagged (harmless in practice — season boundaries are flat). Samples
+        % with < swe_min_support finite neighbors in the window are masked:
+        % too little local support to QC against.
+        swe_ref = movmedian(swe_num, 97, 'omitnan');
+        swe_n   = movsum(isfinite(swe_num), 97);
+        swe_num(abs(swe_num - swe_ref) > swe_spike_thr | ...
+                (isfinite(swe_num) & swe_n < swe_min_support)) = NaN;
+
+        WX = table(ts, depth_num, airtc_num, tempc_num, swe_num, ...
+            'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c', 'swe_mm'});
         WX = sortrows(WX, 'timestamp');
     catch ME
         warning('BrundageSoOp:snodar', 'SNOdar load failed: %s', ME.message);

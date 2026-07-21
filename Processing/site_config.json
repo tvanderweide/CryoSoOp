@@ -34,17 +34,19 @@
     "hpc": {
       "data_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/Data/",
       "input_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/Static",
-      "out_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/2026-06-24/",
+      "out_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/2026-07-17/",
       "matlab_jobs": "/bsuscratch/thomasvanderweide/BrundageSoOp/matlab_jobs"
     },
     "local": {
       "data_dir": "F:\\Data\\",
       "input_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\Static",
-      "out_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\2026-06-24\\"
+      "out_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\2026-07-17\\"
     }
   },
   "weather": {
     "wx_dat": "C:\\Users\\thomasvanderweide\\Documents\\Projects\\CryoSoOp\\Background\\20260608_Brundage_15Min.dat",
-    "wx_temp_cols": ["AirTC_Avg", "Temp_C_Avg"]
+    "wx_temp_cols": ["AirTC_Avg", "Temp_C_Avg"],
+    "wx_depth_cols": ["SnoDAR_distance_Avg", "SnoDAR_snow_depth_Avg"],
+    "wx_swe_cols": ["SS_SWE_Avg", "SS_SWE_ErrCode_Avg"]
   }
 }

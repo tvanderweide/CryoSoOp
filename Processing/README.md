@@ -77,8 +77,12 @@ site's copy under another name). Checklist:
      (rationale per field: `docs/config-reference.md`).
    - `season`: `start`/`end` dates, candidate NORAD ids, and the confirmed
      `norad` (see step 4).
-   - `weather` (optional): a local TOA5 `.dat` logger file, its temperature
-     column names for the viewer overlay, and `wx_tz` — the logger's clock
+   - `weather` (optional): a local TOA5 `.dat` logger file, the per-site
+     column names behind the viewer's four weather overlays —
+     `wx_temp_cols` (two temperatures), `wx_depth_cols` (snow-depth
+     distance + depth pair), `wx_swe_cols` (snow-scale SWE value + error
+     code); null/absent keys fall back to the Brundage headers — and
+     `wx_tz` — the logger's clock
      zone (Campbell loggers run fixed standard time year-round; Brundage is
      UTC−7, i.e. `"Etc/GMT+7"` — note the POSIX sign convention: `Etc/GMT+7`
      IS UTC−7). When set, weather timestamps are converted into the capture

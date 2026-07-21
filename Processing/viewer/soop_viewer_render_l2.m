@@ -92,12 +92,32 @@ function soop_viewer_render_l2(V, kind)
     % Formerly split into "L2: Candidates" (phase only) and "L2: + SNOdar"
     % (phase + depth + temperature). Now unified: phase always draws; snow
     % depth and the two station temperatures each toggle via a checkbox.
-    if startsWith(kind, 'L2: Candidates')
+    if V.U.is_cand_kind(kind)
         if isempty(S.CAND)
             show_msg('Needs sat_candidates_corrected.csv — run compare_sat_candidates');
             return;
         end
         [t0, t1] = range_bounds();
+        % Display SNR cutoff (side-panel spinner), applied BEFORE the daily
+        % time-of-day pick with the producer's exact predicate — so raising
+        % the cutoff can swap a day's representative to the nearest PASSING
+        % capture (same semantics as re-running compare_sat_candidates at
+        % the higher threshold). The title notes the cutoff only when it
+        % differs from the validated configured start (state-based, never
+        % keyed to how many rows a given range lost). snr_ok is false for
+        % pre-snr_db candidate products (spinner disabled in callbacks).
+        snr_cut = S.sp_snrcut.Value;
+        [CAND, snr_ok] = V.U.snrcut_apply(S.CAND, snr_cut);
+        snr_note = '';
+        if snr_ok && snr_cut ~= V.U.snrcut_start(V.cfg)
+            snr_note = sprintf([' ' char(8212) ' SNR ' char(8805) ' %g dB'], snr_cut);
+        end
+        % Distinguish "range/window empty" from "the SNR cutoff removed the
+        % pick(s)" in both branches below: the hint appears only when the
+        % SAME selection re-run on the unfiltered table yields rows (no
+        % numeric count — nonfinite-SNR rows drop too, not just "below").
+        cut_hint = sprintf(['Captures exist there, but none with valid SNR ' ...
+            char(8805) ' %g dB.'], snr_cut);
         % Optional daily time-of-day filter: one capture per target day (the
         % capture nearest that day's target instant), dropping days whose
         % nearest capture is farther than TOD_WINDOW away. The date range
@@ -114,27 +134,43 @@ function soop_viewer_render_l2(V, kind)
                 show_msg('Enter time as H, HHMM, or HH:MM (e.g. 0600).');
                 return;
             end
-            TCw = S.CAND(tcol(S.CAND) >= t0 - TOD_WINDOW & ...
-                         tcol(S.CAND) <  t1 + TOD_WINDOW, :);
+            in_win = @(T) T(tcol(T) >= t0 - TOD_WINDOW & ...
+                            tcol(T) <  t1 + TOD_WINDOW, :);
+            TCw = in_win(CAND);
             [ix, tday] = V.U.tod_daily_idx(tcol(TCw), tgt, TOD_WINDOW);
             TC = TCw(ix(tday >= t0 & tday < t1), :);
             if isempty(TC)
-                show_msg(['No daily captures within ' char(177) '1 h of ' ...
-                          char(tgt, 'hh:mm') ' in the selected date range.']);
+                msg = ['No daily captures within ' char(177) '1 h of ' ...
+                       char(tgt, 'hh:mm') ' in the selected date range.'];
+                % Re-run the SAME selection on the unfiltered table: only a
+                % nonempty unfiltered pick proves the cutoff (not the
+                % window) removed the day(s).
+                if snr_ok
+                    TCw0 = in_win(S.CAND);
+                    [ix0, tday0] = V.U.tod_daily_idx(tcol(TCw0), tgt, TOD_WINDOW);
+                    if ~isempty(TCw0(ix0(tday0 >= t0 & tday0 < t1), :))
+                        msg = [msg ' ' cut_hint];
+                    end
+                end
+                show_msg(msg);
                 return;
             end
             tod_note = [' — daily @ ' char(tgt, 'hh:mm') ' ' char(177) '1 h'];
         else
-            TC = S.CAND(tcol(S.CAND) >= t0 & tcol(S.CAND) < t1, :);
+            TC = CAND(tcol(CAND) >= t0 & tcol(CAND) < t1, :);
             if isempty(TC)
-                show_msg('No candidate rows in the selected date range.');
+                msg = 'No candidate rows in the selected date range.';
+                if snr_ok && ~isempty(S.CAND(tcol(S.CAND) >= t0 & tcol(S.CAND) < t1, :))
+                    msg = cut_hint;
+                end
+                show_msg(msg);
                 return;
             end
         end
         m = regexp(kind, '\((\d+)\)', 'tokens', 'once');
         if isempty(m)
             c_sinc = 'phase_raw_deg';  c_fd = 'phase_raw_fd_deg';
-            c_muos = 'phase_raw_fd_muos_deg';  phase_label = 'raw (no correction)';
+            c_muos = 'phase_raw_fd_muos_deg';  phase_label = 'sensor data';
         else
             c_sinc = ['corr_' m{1}];  c_fd = ['corr_' m{1} '_fd'];
             c_muos = ['corr_' m{1} '_fd_muos'];
@@ -155,7 +191,7 @@ function soop_viewer_render_l2(V, kind)
             y_ph = wrap_deg(y_ph + dlt);
             phase_label = [phase_label ' + phase offset cal'];
         end
-        phase_label = [phase_label tod_note];   % '' unless the daily filter is on
+        phase_label = [phase_label tod_note snr_note];   % '' unless filters active
         agg = S.dd_agg.Value;
         % Weather rows in range (depth + temperatures share this table). Each
         % overlay is gated by its checkbox AND the presence of finite data.
@@ -166,9 +202,13 @@ function soop_viewer_render_l2(V, kind)
         end
         has_col = @(c) ~isempty(TW) && ismember(c, TW.Properties.VariableNames);
         show_dep = S.cb_depth.Value && has_col('depth_m')  && any(isfinite(TW.depth_m));
+        show_swe = S.cb_swe.Value   && has_col('swe_mm')  && any(isfinite(TW.swe_mm));
         show_air = S.cb_airtc.Value && has_col('airtc_c') && any(isfinite(TW.airtc_c));
         show_tmp = S.cb_tempc.Value && has_col('temp_c')  && any(isfinite(TW.temp_c));
-        want_temp = (show_air || show_tmp) && t1 > t0;
+        % AboveFreezing swaps the ticked temperature LINES for one orange
+        % above-freezing band layer — no temperature ruler axes then.
+        abvfrz = S.cb_abvfrz.Value;
+        want_temp = (show_air || show_tmp) && t1 > t0 && ~abvfrz;
         % Depth and temperature always plot at raw 15-min resolution; the agg
         % dropdown only applies to the phase line.
         agg_wx = 'Raw captures';
@@ -184,21 +224,142 @@ function soop_viewer_render_l2(V, kind)
         leg = {};  lh = gobjects(0);   % legend labels + handles, built as drawn
         % Left axis: phase (wrapped circular, as collected)
         yyaxis(ax, 'left');
-        lh(end+1) = plot_series(ax, tcol(TC), y_ph, agg, 'phase');
+        h_phase = plot_series(ax, tcol(TC), y_ph, agg, 'phase');
+        if S.cb_tod.Value
+            % Daily-filter points read better slightly larger (works on
+            % both the raw Line and the aggregated ErrorBar handle).
+            h_phase.MarkerSize = h_phase.MarkerSize + 2;
+        end
+        % phaseLine governs the connecting line in EVERY agg mode (both
+        % handle types): unchecked = markers only, checked = joined. Note a
+        % joined line bridges NaN samples and long capture gaps (aggregate
+        % drops nonfinite rows) and draws jump segments at ±180° wraps.
+        if S.cb_phline.Value
+            h_phase.LineStyle = '-';
+        else
+            h_phase.LineStyle = 'none';
+        end
+        lh(end+1) = h_phase;
+        % Hour-of-day coloring: the render re-checks the FULL predicate (a
+        % checked-but-disabled box draws nothing). Colors derive from the
+        % SAME aggregate the displayed points use (Raw captures / Per-run
+        % mean keep hour identity via the group-midpoint timestamp); the
+        % plot_series handle keeps its phaseLine line / error bars but
+        % hides its own markers so the colored scatter reads.
+        hour_on = S.cb_hourcolor.Value && ~S.cb_tod.Value && ...
+                  any(strcmp(agg, {'Raw captures', 'Per-run mean'}));
+        if hour_on
+            [ta_h, ya_h] = M.aggregate(tcol(TC), y_ph, agg, 'phase');
+            h_phase.Marker = 'none';
+            hsc = scatter(ax, ta_h, ya_h, 36, V.U.hour_bins(ta_h) + 0.5, 'filled');
+            colormap(ax, hsv(24));           % cyclic map for a cyclic hour
+            clim(ax, [0 24]);
+            hcb = colorbar(ax, 'north');     % inside: fixed axes geometry kept
+            hcb.Ticks = (0:4:20) + 0.5;      % bin centers — there is no hour 24
+            hcb.TickLabels = compose('%d', 0:4:20);
+            hcb.Label.String = 'nearest hour (capture timebase)';
+            lh(end) = hsc;                   % legend binds the colored points
+        end
         ylabel(ax, 'Phase (deg)');
         ylim(ax, [-180 180]);  yticks(ax, -180:90:180);
         leg{end+1} = 'Phase';
-        % Right axis: SNOdar depth (red), only when toggled on
-        if show_dep
+        % AboveFreezing wet-snow bands: one orange layer over the times ANY
+        % ticked temperature sensor reads > 0 degC (union; a sample where
+        % every ticked sensor is invalid splits the band, as do sample gaps
+        % > 1.5x the station cadence — see freeze_spans). xregion spans the
+        % full height of the yyaxis pair, ships since R2023a, and Layer
+        % 'bottom' keeps the bands behind the data.
+        if abvfrz && (show_air || show_tmp)
+            cols = [];
+            if show_air, cols = [cols, TW.airtc_c]; end
+            if show_tmp, cols = [cols, TW.temp_c];  end
+            sp = V.U.freeze_spans(tcol(TW), max(cols, [], 2, 'omitnan'));
+            if ~isempty(sp)
+                hr = xregion(ax, sp(:, 1), sp(:, 2), ...
+                             'FaceColor', [1.0 0.55 0.10], 'FaceAlpha', 0.18, ...
+                             'Layer', 'bottom');
+                lh(end+1) = hr(1);
+                leg{end+1} = ['Air Temp > 0' char(176) 'C'];
+            end
+        end
+        % Right axis: SNOdar depth (red) and/or snow-scale SWE (teal). With
+        % SWE shown the shared ruler is in MILLIMETERS (the papers' SWE
+        % unit; depth joins as mm via R.dep_factor); depth-only keeps the
+        % meters ruler. Label/color/scaling/ylim come from the pure
+        % wx_right_axis helper (R.pad is unit-aware: 0.1 m vs 100 mm).
+        if show_dep || show_swe
             yyaxis(ax, 'right');
-            [ta, ya] = M.aggregate(tcol(TW), TW.depth_m, agg_wx, 'lin');
-            lh(end+1) = plot(ax, ta, ya, 'r-');
-            leg{end+1} = 'SNOdar depth';
-            ylabel(ax, 'Snow depth (m)');
-            ymax = max(ya, [], 'omitnan');
-            if isfinite(ymax), ylim(ax, [0, ymax * 1.1 + 0.1]); end
-            ax.YAxis(2).Color = [0.8 0 0];
+            dep_pl = []; swe_pl = [];
+            if show_dep, [~, dep_pl] = M.aggregate(tcol(TW), TW.depth_m, agg_wx, 'lin'); end
+            if show_swe, [~, swe_pl] = M.aggregate(tcol(TW), TW.swe_mm,  agg_wx, 'lin'); end
+            R = V.U.wx_right_axis(show_dep, show_swe, dep_pl, swe_pl);
+            if show_dep
+                [ta, ya] = M.aggregate(tcol(TW), TW.depth_m, agg_wx, 'lin');
+                lh(end+1) = plot(ax, ta, ya * R.dep_factor, 'r-');
+                leg{end+1} = 'SNOdar depth';
+            end
+            if show_swe
+                [ta, ya] = M.aggregate(tcol(TW), TW.swe_mm, agg_wx, 'lin');
+                lh(end+1) = plot(ax, ta, ya, '-', 'Color', [0.00 0.60 0.45]);
+                leg{end+1} = 'SWE';
+            end
+            ylabel(ax, R.label);
+            if isfinite(R.ymax), ylim(ax, [0, R.ymax * 1.1 + R.pad]); end
+            ax.YAxis(2).Color = R.color;
             yyaxis(ax, 'left');   % restore left as active for title/labels
+        end
+        % yyaxis mode always draws a right ruler; hide it when nothing is
+        % plotted on it (depth and SWE both off) so the figure has no bare
+        % 0-1 axis on the right.
+        ax.YAxis(2).Visible = matlab.lang.OnOffSwitchState(show_dep || show_swe);
+
+        % Theoretical phase-from-SWE overlay (LEFT phase axis — active again
+        % here; raw 15-min curve in EVERY agg mode, never aggregated; drawn
+        % only while the SWE overlay is shown). Fringe rate from the
+        % confirmed satellite geometry: theta_inc = 90 - mean elevation of
+        % the L2 rows matched to the displayed candidates by base_name
+        % (fallback: finite L2 rows in range; none -> unavailable, drawn as
+        % nothing). Anchoring/availability live in the pure theory_overlay
+        % helper; the legend carries the paper-sign and record-start-anchor
+        % labels.
+        % Geometry-computed fringe rate + the provenance-tracked field latch
+        % run on EVERY family render (not only when theory is checked) so
+        % the mm/2pi field shows the actual auto value instead of a
+        % placeholder. The latch never flips auto/manual provenance (owned
+        % by on_fringe_edit) and passes the UNROUNDED auto rate to the
+        % overlay — display rounding must not change the physics.
+        th = NaN;
+        if ~isempty(S.L2) && all(ismember({'base_name', 'theta_deg'}, ...
+                                          S.L2.Properties.VariableNames))
+            [tf_m, loc] = ismember(string(TC.base_name), string(S.L2.base_name));
+            thv = S.L2.theta_deg(loc(tf_m));
+            thv = thv(isfinite(thv));
+            if isempty(thv)
+                L2r = S.L2(tcol(S.L2) >= t0 & tcol(S.L2) < t1, :);
+                thv = L2r.theta_deg(isfinite(L2r.theta_deg));
+            end
+            if ~isempty(thv), th = mean(thv, 'omitnan'); end
+        end
+        A = V.U.fringe_latch(S.ef_fringe.Value, S.ef_fringe.UserData, ...
+                             V.U.swe_per_fringe_mm(V.cfg.freq_hz, 90 - th));
+        S.ef_fringe.Value = A.text;
+        S.ef_fringe.UserData = A.ud;
+        fringe = A.mm;
+        if S.cb_theory.Value && show_swe
+            if strcmp(S.dd_thanchor.Value, 'First shown')
+                anch = 'first';
+            else
+                anch = 'swe0';
+            end
+            O = V.U.theory_overlay(tcol(TC), y_ph, tcol(S.WX), S.WX.swe_mm, ...
+                                   anch, fringe);
+            if O.ok
+                mrng = O.t >= t0 & O.t < t1;
+                lh(end+1) = plot(ax, O.t(mrng), O.phi_deg(mrng), '--', ...
+                                 'Color', [0.35 0.35 0.35], 'LineWidth', 1);
+                % TeX \pi; paper-sign/anchor caveats live in the help text.
+                leg{end+1} = sprintf('theoretical (%.0f mm/2\\pi)', fringe);
+            end
         end
         if t1 > t0, xlim(ax, [t0 t1]); end
 
@@ -213,19 +374,24 @@ function soop_viewer_render_l2(V, kind)
                        'Box', 'off', 'HitTest', 'off', 'PickableParts', 'none');
             hold(axT, 'on');
             c_air = [0.17 0.63 0.17];  c_tmp = [0.49 0.18 0.56];
+            % Legend names come from the same per-site source as the row-1
+            % checkbox labels (wx_temp_labels); underscores TeX-escaped for
+            % the legend's tex interpreter.
+            wxlab = V.U.wx_temp_labels(V.cfg);
+            esc = @(s) strrep(s, '_', '\_');
             % Real lines live on axT; the legend (parented to ax) uses
             % invisible proxy lines on ax so it never references axT.
             if show_air
                 [tt, yy] = M.aggregate(tcol(TW), TW.airtc_c, agg_wx, 'lin');
                 plot(axT, tt, yy, '-', 'Color', c_air, 'LineWidth', 1);
                 lh(end+1) = plot(ax, [t0 t0], [NaN NaN], '-', 'Color', c_air, 'LineWidth', 1);
-                leg{end+1} = 'AirTC\_Avg';
+                leg{end+1} = esc(wxlab{1});
             end
             if show_tmp
                 [tt, yy] = M.aggregate(tcol(TW), TW.temp_c, agg_wx, 'lin');
                 plot(axT, tt, yy, '-', 'Color', c_tmp, 'LineWidth', 1);
                 lh(end+1) = plot(ax, [t0 t0], [NaN NaN], '-', 'Color', c_tmp, 'LineWidth', 1);
-                leg{end+1} = 'Temp\_C\_Avg';
+                leg{end+1} = esc(wxlab{2});
             end
             xlim(axT, [t0, t0 + (t1 - t0) * (tmp_w / axW)]);
             yline(axT, 0, ':', 'Color', [0.3 0.3 0.3]);   % 0 degC melt-freeze threshold
@@ -234,7 +400,13 @@ function soop_viewer_render_l2(V, kind)
         end
 
         title(ax, phase_label);
-        legend(lh, leg, 'Location', 'best');
+        if hour_on
+            % Keep the legend away from the inside-north colorbar (the
+            % user's global legend-location override still reapplies).
+            legend(lh, leg, 'Location', 'southwest');
+        else
+            legend(lh, leg, 'Location', 'best');
+        end
         grid(ax, 'on');
         xlabel(ax, 'Date');
         S.last_n = height(TC);

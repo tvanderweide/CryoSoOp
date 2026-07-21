@@ -19,8 +19,9 @@ function compare_sat_candidates(cfg)
 % Outputs (cfg.out_dir):
 %   sat_candidate_comparison.png   — stacked corrected-phase time series
 %   sat_candidates_corrected.csv   — per-candidate corrected phase columns
-%                                    (interactive view: 'L2: Candidate
-%                                    comparison' in BrundageSoOp_viewer). Each
+%                                    (interactive views: the candidates family
+%                                    in BrundageSoOp_viewer — 'L2: Sensor data'
+%                                    and the two MUOS candidate views). Each
 %                                    candidate also gets corr_<norad>_fd and
 %                                    corr_<norad>_fd_muos (frequency-domain phase,
 %                                    full band + MUOS sub-bands), plus

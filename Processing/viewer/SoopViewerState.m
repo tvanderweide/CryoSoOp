@@ -80,8 +80,10 @@ classdef SoopViewerState < handle
         dp1
         dp2
         cb_depth
+        cb_swe
         cb_airtc
         cb_tempc
+        cb_abvfrz
         dd_method
         dd_domain
         dd_ctype
@@ -122,6 +124,17 @@ classdef SoopViewerState < handle
         cb_tod
         ef_tod
         tod_row
+        cb_phline
+        phline_row
+        sp_snrcut
+        snrcut_row
+        cb_theory
+        dd_thanchor
+        theory_row
+        ef_fringe
+        fringe_row
+        cb_hourcolor
+        hour_row
         cb_geom_r2
         cb_geom_r1
         cb_geom_aeff
