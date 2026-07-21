@@ -17,6 +17,21 @@ function C = soop_viewer_callbacks()
     C.on_gap_slider = @on_gap_slider;
     C.on_gap_field = @on_gap_field;
     C.on_fringe_edit = @on_fringe_edit;
+    C.set_family_rows = @set_family_rows;
+end
+
+
+function set_family_rows(V, is_cand)
+% Show/hide the satellite-candidates-family controls: the row-1 weather
+% checkboxes and the side-panel daily/phaseLine/SNR/theory/fringe/hour/
+% style rows. Pure visibility — Enable states and the domain snap stay in
+% render_now. Callable headlessly (layout tests exercise the real gating).
+    S = V;
+    on = matlab.lang.OnOffSwitchState(is_cand);
+    set([S.cb_depth, S.cb_swe, S.cb_airtc, S.cb_tempc, S.cb_abvfrz], ...
+        'Visible', on);
+    set([S.tod_row, S.phline_row, S.snrcut_row, S.theory_row, ...
+         S.fringe_row, S.hour_row, S.style_row], 'Visible', on);
 end
 
 
@@ -387,18 +402,11 @@ function render_now(V)
             'snow depth). Clear = mean over the top date range.'];
     end
 
-    % Weather-overlay toggles (snow depth + SWE + the two temperatures) and
-    % the side-panel daily/phaseLine/SNR/theory/fringe/hour rows apply only
-    % to the satellite-candidates family (the two MUOS views + Sensor data).
+    % Weather-overlay toggles and the family side-panel rows apply only to
+    % the satellite-candidates family (the two MUOS views + Sensor data);
+    % the visibility set lives in set_family_rows (shared with tests).
     is_cand = V.U.is_cand_kind(kind);
-    set([S.cb_depth, S.cb_swe, S.cb_airtc, S.cb_tempc, S.cb_abvfrz], ...
-        'Visible', matlab.lang.OnOffSwitchState(is_cand));
-    S.tod_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
-    S.phline_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
-    S.snrcut_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
-    S.theory_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
-    S.fringe_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
-    S.hour_row.Visible = matlab.lang.OnOffSwitchState(is_cand);
+    set_family_rows(V, is_cand);
     if is_cand
         % These overlay panels draw ONE phase column, so the multi-domain
         % 'Compare all' selection is meaningless here — snap the dropdown to

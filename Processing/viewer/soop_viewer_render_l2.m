@@ -222,6 +222,11 @@ function soop_viewer_render_l2(V, kind)
         ax  = axes(S.panel, 'Position', ax_pos);
         hold(ax, 'on');   % depth + legend proxies share ax's right side
         leg = {};  lh = gobjects(0);   % legend labels + handles, built as drawn
+        % Style-scale accumulators (Line x / Pt x spinners): every handle
+        % drawn as a line joins st_lines, phase-marker handles st_pts, and
+        % hour-color dots st_dots; style_apply multiplies their base
+        % styles ONCE after all drawing (both axes), before the legend.
+        st_lines = gobjects(0);  st_pts = gobjects(0);  st_dots = gobjects(0);
         % Left axis: phase (wrapped circular, as collected)
         yyaxis(ax, 'left');
         h_phase = plot_series(ax, tcol(TC), y_ph, agg, 'phase');
@@ -240,6 +245,8 @@ function soop_viewer_render_l2(V, kind)
             h_phase.LineStyle = 'none';
         end
         lh(end+1) = h_phase;
+        st_pts(end+1) = h_phase;    % markers scale by Pt x (incl. phaseLine)
+        st_lines(end+1) = h_phase;  % the joined phaseLine scales by Line x
         % Hour-of-day coloring: the render re-checks the FULL predicate (a
         % checked-but-disabled box draws nothing). Colors derive from the
         % SAME aggregate the displayed points use (Raw captures / Per-run
@@ -254,11 +261,12 @@ function soop_viewer_render_l2(V, kind)
             hsc = scatter(ax, ta_h, ya_h, 36, V.U.hour_bins(ta_h) + 0.5, 'filled');
             colormap(ax, hsv(24));           % cyclic map for a cyclic hour
             clim(ax, [0 24]);
-            hcb = colorbar(ax, 'north');     % inside: fixed axes geometry kept
+            hcb = colorbar(ax, 'southoutside');  % below the plot box
             hcb.Ticks = (0:4:20) + 0.5;      % bin centers — there is no hour 24
             hcb.TickLabels = compose('%d', 0:4:20);
             hcb.Label.String = 'nearest hour (capture timebase)';
             lh(end) = hsc;                   % legend binds the colored points
+            st_dots(end+1) = hsc;            % dot area scales by (Pt x)^2
         end
         ylabel(ax, 'Phase (deg)');
         ylim(ax, [-180 180]);  yticks(ax, -180:90:180);
@@ -295,12 +303,16 @@ function soop_viewer_render_l2(V, kind)
             R = V.U.wx_right_axis(show_dep, show_swe, dep_pl, swe_pl);
             if show_dep
                 [ta, ya] = M.aggregate(tcol(TW), TW.depth_m, agg_wx, 'lin');
-                lh(end+1) = plot(ax, ta, ya * R.dep_factor, 'r-');
+                lh(end+1) = plot(ax, ta, ya * R.dep_factor, 'r-', ...
+                                 'LineWidth', 0.5);
+                st_lines(end+1) = lh(end);
                 leg{end+1} = 'SNOdar depth';
             end
             if show_swe
                 [ta, ya] = M.aggregate(tcol(TW), TW.swe_mm, agg_wx, 'lin');
-                lh(end+1) = plot(ax, ta, ya, '-', 'Color', [0.00 0.60 0.45]);
+                lh(end+1) = plot(ax, ta, ya, '-', 'Color', [0.00 0.60 0.45], ...
+                                 'LineWidth', 0.5);
+                st_lines(end+1) = lh(end);
                 leg{end+1} = 'SWE';
             end
             ylabel(ax, R.label);
@@ -357,6 +369,7 @@ function soop_viewer_render_l2(V, kind)
                 mrng = O.t >= t0 & O.t < t1;
                 lh(end+1) = plot(ax, O.t(mrng), O.phi_deg(mrng), '--', ...
                                  'Color', [0.35 0.35 0.35], 'LineWidth', 1);
+                st_lines(end+1) = lh(end);
                 % TeX \pi; paper-sign/anchor caveats live in the help text.
                 leg{end+1} = sprintf('theoretical (%.0f mm/2\\pi)', fringe);
             end
@@ -383,30 +396,36 @@ function soop_viewer_render_l2(V, kind)
             % invisible proxy lines on ax so it never references axT.
             if show_air
                 [tt, yy] = M.aggregate(tcol(TW), TW.airtc_c, agg_wx, 'lin');
-                plot(axT, tt, yy, '-', 'Color', c_air, 'LineWidth', 1);
+                st_lines(end+1) = plot(axT, tt, yy, '-', 'Color', c_air, ...
+                                       'LineWidth', 1);
                 lh(end+1) = plot(ax, [t0 t0], [NaN NaN], '-', 'Color', c_air, 'LineWidth', 1);
+                st_lines(end+1) = lh(end);   % proxy width matches the real line
                 leg{end+1} = esc(wxlab{1});
             end
             if show_tmp
                 [tt, yy] = M.aggregate(tcol(TW), TW.temp_c, agg_wx, 'lin');
-                plot(axT, tt, yy, '-', 'Color', c_tmp, 'LineWidth', 1);
+                st_lines(end+1) = plot(axT, tt, yy, '-', 'Color', c_tmp, ...
+                                       'LineWidth', 1);
                 lh(end+1) = plot(ax, [t0 t0], [NaN NaN], '-', 'Color', c_tmp, 'LineWidth', 1);
+                st_lines(end+1) = lh(end);   % proxy width matches the real line
                 leg{end+1} = esc(wxlab{2});
             end
             xlim(axT, [t0, t0 + (t1 - t0) * (tmp_w / axW)]);
-            yline(axT, 0, ':', 'Color', [0.3 0.3 0.3]);   % 0 degC melt-freeze threshold
+            % 0 degC melt-freeze threshold — a drawn line, so it scales too
+            st_lines(end+1) = yline(axT, 0, ':', 'Color', [0.3 0.3 0.3], ...
+                                    'LineWidth', 0.5);
             ylabel(axT, 'Temperature (\circC)');
             axT.YColor = [0.2 0.2 0.2];
         end
 
+        % Line x / Pt x spinners: multiply the product base styles once,
+        % across both axes (ax + axT), after the TOD marker bump and
+        % before the legend binds its swatches.
+        V.U.style_apply(V.U.style_factors(S.sp_linew.Value, S.sp_ptsz.Value), ...
+                        st_lines, st_pts, st_dots);
+
         title(ax, phase_label);
-        if hour_on
-            % Keep the legend away from the inside-north colorbar (the
-            % user's global legend-location override still reapplies).
-            legend(lh, leg, 'Location', 'southwest');
-        else
-            legend(lh, leg, 'Location', 'best');
-        end
+        legend(lh, leg, 'Location', 'best');
         grid(ax, 'on');
         xlabel(ax, 'Date');
         S.last_n = height(TC);

@@ -730,7 +730,7 @@ end
 
 function test_hour_scatter_graphics(tc)
     % Render contract for hour coloring: scatter with numeric CData on a
-    % yyaxis-left axes + per-axes cyclic colormap + clim + an inside-north
+    % yyaxis-left axes + per-axes cyclic colormap + clim + a south-outside
     % colorbar with centered ticks coexist with a datetime x-axis.
     fig = figure('Visible', 'off');
     cleanup = onCleanup(@() close(fig));
@@ -741,14 +741,14 @@ function test_hour_scatter_graphics(tc)
     hsc = scatter(ax, t, sin(1:12), 36, mod(0:2:22, 24) + 0.5, 'filled');
     colormap(ax, hsv(24));
     clim(ax, [0 24]);
-    hcb = colorbar(ax, 'north');
+    hcb = colorbar(ax, 'southoutside');
     hcb.Ticks = (0:4:20) + 0.5;
     hcb.TickLabels = compose('%d', 0:4:20);
     verifyNumElements(tc, hcb.Ticks, 6);
     verifyEqual(tc, ax.CLim, [0 24]);
     verifyNumElements(tc, hsc.CData, 12);
-    lgd = legend(hsc, {'Phase'}, 'Location', 'southwest');
-    verifyEqual(tc, char(lgd.Location), 'southwest');
+    lgd = legend(hsc, {'Phase'}, 'Location', 'best');
+    verifyEqual(tc, char(lgd.Location), 'best');
 end
 
 function test_linestyle_toggle(tc)
@@ -831,4 +831,124 @@ function test_r1_replica_budget(tc)
     verifyLessThanOrEqual(tc, last(1) + last(3), interior, ...
         sprintf('AboveFreezing right edge %.0f px exceeds %d px interior', ...
                 last(1) + last(3), interior));
+end
+
+% -------------------------------------------------- style-scale controls
+
+function test_style_factors(tc)
+    % Validation matrix for the Line x / Pt x factor helper: real finite
+    % positive scalars pass through as double, everything else -> x1.
+    U = tc.TestData.U;
+    F = U.style_factors(2, 0.5);
+    verifyEqual(tc, fieldnames(F), {'lw'; 'pt'});
+    verifyEqual(tc, F.lw, 2);
+    verifyEqual(tc, F.pt, 0.5);
+    F = U.style_factors(int32(3), single(2));   % double-conversion contract
+    verifyClass(tc, F.lw, 'double');  verifyEqual(tc, F.lw, 3);
+    verifyClass(tc, F.pt, 'double');  verifyEqual(tc, F.pt, 2);
+    bad = {NaN, Inf, -Inf, 0, -1.5, 2 + 1i, [], [1 2], 'x', {2}, true};
+    for k = 1:numel(bad)
+        F = U.style_factors(bad{k}, bad{k});
+        verifyEqual(tc, F.lw, 1, sprintf('lw fallback, bad input #%d', k));
+        verifyEqual(tc, F.pt, 1, sprintf('pt fallback, bad input #%d', k));
+    end
+end
+
+function test_style_apply(tc)
+    % Production application path on real handles: LineWidth x lw on line
+    % handles, MarkerSize x pt on point handles, SizeData x pt^2 on scatter
+    % (area units); a handle listed as both line and points gets both; x1
+    % is a no-op; deleted/placeholder handles are skipped without error.
+    U = tc.TestData.U;
+    fig = figure('Visible', 'off');
+    cleanup = onCleanup(@() close(fig));
+    ax = axes(fig);  hold(ax, 'on');
+    hd = plot(ax, 1:5, 1:5, '.', 'MarkerSize', 6, 'LineWidth', 0.5);
+    he = errorbar(ax, 1:5, 1:5, ones(1, 5), 'o-', 'MarkerSize', 4, ...
+                  'CapSize', 3, 'LineWidth', 0.5);
+    hs = scatter(ax, 1:5, 1:5, 36, 'filled');
+    hy = yline(ax, 0, ':', 'LineWidth', 0.5);
+    U.style_apply(U.style_factors(1, 1), [hd he hy], [hd he], hs);
+    verifyEqual(tc, hd.MarkerSize, 6);   verifyEqual(tc, hd.LineWidth, 0.5);
+    verifyEqual(tc, he.MarkerSize, 4);   verifyEqual(tc, he.LineWidth, 0.5);
+    verifyEqual(tc, hy.LineWidth, 0.5);  verifyEqual(tc, hs.SizeData, 36);
+    U.style_apply(U.style_factors(2, 3), [hd he hy], [hd he], hs);
+    verifyEqual(tc, hd.LineWidth, 1.0);  verifyEqual(tc, hd.MarkerSize, 18);
+    verifyEqual(tc, he.LineWidth, 1.0);  verifyEqual(tc, he.MarkerSize, 12);
+    verifyEqual(tc, hy.LineWidth, 1.0);
+    verifyEqual(tc, hs.SizeData, 36 * 9);      % apparent diameter x3
+    % TOD-bump ordering contract: bump BEFORE scaling => (4 + 2) * 3
+    he2 = errorbar(ax, 1:5, 2:6, ones(1, 5), 'o-', 'MarkerSize', 4, ...
+                   'CapSize', 3, 'LineWidth', 0.5);
+    he2.MarkerSize = he2.MarkerSize + 2;
+    U.style_apply(U.style_factors(1, 3), gobjects(0), he2, gobjects(0));
+    verifyEqual(tc, he2.MarkerSize, 18);
+    % Deleted + placeholder entries skipped; valid entries still scale
+    hjunk = plot(ax, 1:3, 1:3, '-', 'LineWidth', 1);
+    delete(hjunk);
+    arr = gobjects(1, 3);  arr(1) = hy;  arr(2) = hjunk;
+    U.style_apply(U.style_factors(2, 1), arr, gobjects(0), gobjects(0));
+    verifyEqual(tc, hy.LineWidth, 2.0);
+end
+
+function test_style_layout_and_gating(tc)
+    % Real-layout contract (no data load): build the actual viewer layout
+    % headlessly with a minimal cfg, then check the style spinners'
+    % construction, the row's placement directly under the legend row, the
+    % side-panel grid geometry, the initial hidden state, the production
+    % family gating (CB.set_family_rows), and value persistence across
+    % visibility flips.
+    cfg = struct('freq_hz', 370e6, 'fs', 20e6, 'num_segs', 2, 'Ti', 0.9, ...
+                 'peak_lag', -0.575, 'T_load_K', 290, ...
+                 'out_dir', tc.TestData.dir, 'data_dir', tc.TestData.dir);
+    V = SoopViewerState();
+    V.cfg = cfg;
+    V.M   = BrundageSoOp_fun();
+    V.npts = floor(cfg.fs * cfg.Ti);  V.n_want = V.npts * cfg.num_segs;
+    V.calib_N_looks = cfg.fs * 2;
+    V.Erfi = rfi_excise();
+    V.L1 = table();  V.CAL = table();
+    V.cache = struct('key', "", 'data', []);
+    V.calib_base_cache  = struct('dir', "", 'T', table());
+    V.calib_notch_cache = struct('dir', "", 'T', table());
+    V.busy = false;  V.pending = false;  V.last_n = 0;
+    V.OVF = strings(0, 1);
+    V.cap_folders = containers.Map('KeyType', 'char', 'ValueType', 'char');
+    V.ov_title = '';  V.ov_xlabel = '';  V.ov_ylabel = '';
+    V.ov_plot_kind = '';
+    V.U = soop_viewer_util();  V.D = soop_viewer_data();
+    V.CB = soop_viewer_callbacks();
+    [V.PLOT_INFO, V.CAP_PATTERNS] = soop_viewer_catalog(cfg);
+    soop_viewer_layout(V);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    verifyEqual(tc, V.sp_linew.Value, 1);
+    verifyEqual(tc, V.sp_ptsz.Value, 1);
+    verifyEqual(tc, V.sp_linew.Limits, [0.25 5]);
+    verifyEqual(tc, V.sp_ptsz.Limits, [0.25 5]);
+    verifyEqual(tc, V.sp_linew.Step, 0.25);
+    verifyEqual(tc, V.sp_ptsz.Step, 0.25);
+
+    % Placement: directly under the legend row; grid has 19 x 28 px control
+    % rows before the two 56 px sub-grid rows.
+    g = V.style_row.Parent;
+    verifyEqual(tc, V.style_row.Layout.Row, ...
+                V.dd_legend.Parent.Layout.Row + 1);
+    verifyNumElements(tc, g.RowHeight, 29);
+    verifyEqual(tc, [g.RowHeight{1:19}], repmat(28, 1, 19));
+    verifyEqual(tc, [g.RowHeight{20:21}], [56 56]);
+
+    % Hidden at build; the production family gate shows/hides it with the
+    % other candidates rows; spinner values persist across the flip.
+    verifyFalse(tc, logical(V.style_row.Visible));
+    V.CB.set_family_rows(V, true);
+    verifyTrue(tc, logical(V.style_row.Visible));
+    verifyTrue(tc, logical(V.hour_row.Visible));
+    verifyTrue(tc, logical(V.cb_swe.Visible));
+    V.sp_linew.Value = 2.5;  V.sp_ptsz.Value = 0.5;
+    V.CB.set_family_rows(V, false);
+    verifyFalse(tc, logical(V.style_row.Visible));
+    V.CB.set_family_rows(V, true);
+    verifyEqual(tc, V.sp_linew.Value, 2.5);
+    verifyEqual(tc, V.sp_ptsz.Value, 0.5);
 end

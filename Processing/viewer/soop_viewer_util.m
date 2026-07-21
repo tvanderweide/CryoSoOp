@@ -5,7 +5,7 @@ function U = soop_viewer_util()
 % parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/freeze_spans/
 % wx_right_axis/snrcut_usable/snrcut_apply/snrcut_start/wx_temp_labels/
 % swe_per_fringe_mm/fringe_pick/fringe_latch/theory_overlay/is_cand_kind/
-% hour_bins/src_desc/open_fun).
+% hour_bins/style_factors/style_apply/src_desc/open_fun).
     U.range_bounds = @range_bounds;
     U.apply_overrides = @apply_overrides;
     U.style_legend = @style_legend;
@@ -48,6 +48,8 @@ function U = soop_viewer_util()
     U.theory_overlay = @theory_overlay;
     U.is_cand_kind = @is_cand_kind;
     U.hour_bins = @hour_bins;
+    U.style_factors = @style_factors;
+    U.style_apply = @style_apply;
     U.src_desc = @src_desc;
     U.open_fun = @open_fun;
 end
@@ -439,6 +441,42 @@ function h = hour_bins(t)
 end
 
 
+function F = style_factors(v_lw, v_pt)
+% Validated Line x / Pt x scale factors for the candidates-family style
+% spinners. Each input must be a real, finite, positive numeric scalar;
+% anything else falls back to x1 so a render never errors on a bad value.
+% Pure helper (no V) — headlessly testable.
+    F = struct('lw', sane(v_lw), 'pt', sane(v_pt));
+    function s = sane(v)
+        if isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v) && v > 0
+            s = double(v);
+        else
+            s = 1;
+        end
+    end
+end
+
+
+function style_apply(F, lines_h, pts_h, dots_h)
+% Apply validated style factors (style_factors) to the candidates-family
+% handles by MULTIPLYING their product-owned base styles: LineWidth x F.lw
+% on lines_h, MarkerSize x F.pt on pts_h, and SizeData x F.pt^2 on dots_h
+% (scatter sizes are areas in points^2, so the apparent dot diameter
+% scales linearly with F.pt like the markers). A handle may appear in more
+% than one list (the phase Line/ErrorBar carries both a line and markers).
+% Invalid/deleted entries are skipped so a partial render never errors.
+    for h = reshape(lines_h(isgraphics(lines_h)), 1, [])
+        h.LineWidth = h.LineWidth * F.lw;
+    end
+    for h = reshape(pts_h(isgraphics(pts_h)), 1, [])
+        h.MarkerSize = h.MarkerSize * F.pt;
+    end
+    for h = reshape(dots_h(isgraphics(dots_h)), 1, [])
+        h.SizeData = h.SizeData * F.pt^2;
+    end
+end
+
+
 function A = fringe_latch(txt, ud, auto_mm)
 % Provenance-tracked state machine for the theoretical mm-per-fringe field.
 % Inputs: the field's current text, its UserData provenance struct (may be
@@ -652,10 +690,15 @@ end
 function h = plot_series(V, ax, t, y, agg_mode, kind)
     M = V.M;
     [ta, ya, ys] = M.aggregate(t, y, agg_mode, kind);
+    % Product-owned base style, set explicitly (values equal the MATLAB
+    % defaults, so nothing changes appearance): the candidates family's
+    % Line x / Pt x spinners scale FROM these via style_apply, and pinning
+    % them here keeps that scaling release-stable.
     if isempty(ys)
-        h = plot(ax, ta, ya, '.');
+        h = plot(ax, ta, ya, '.', 'MarkerSize', 6, 'LineWidth', 0.5);
     else
-        h = errorbar(ax, ta, ya, ys, 'o-', 'MarkerSize', 4, 'CapSize', 3);
+        h = errorbar(ax, ta, ya, ys, 'o-', 'MarkerSize', 4, 'CapSize', 3, ...
+                     'LineWidth', 0.5);
     end
     xlabel(ax, 'Date');
 end

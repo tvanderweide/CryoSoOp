@@ -135,6 +135,9 @@ classdef SoopViewerState < handle
         fringe_row
         cb_hourcolor
         hour_row
+        sp_linew
+        sp_ptsz
+        style_row
         cb_geom_r2
         cb_geom_r1
         cb_geom_aeff

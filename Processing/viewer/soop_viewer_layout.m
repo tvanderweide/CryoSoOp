@@ -144,12 +144,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [28 1]);
-    % Rows 19/20 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [29 1]);
+    % Rows 20/21 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    % The 28 px control rows are children 1-18 (the run of 28s below), so a
+    % The 28 px control rows are children 1-19 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -215,6 +215,31 @@ function soop_viewer_layout(V)
          'north', 'south', 'east', 'west', ...
          'northoutside', 'southoutside', 'eastoutside', 'westoutside', 'none'}, ...
         'Value', 'best', 'ValueChangedFcn', @(~,~) V.U.apply_overrides(V));
+
+    % Line-width / point-size scale spinners — candidates family only.
+    % Multipliers on the product base styles (x1 = today's look): Line x
+    % scales the width of every drawn line (phase line, weather / theory /
+    % temperature lines and their legend proxies, the 0 degC threshold);
+    % Pt x scales the phase marker size and the hour-color dot size.
+    % Applied at render time via style_factors + style_apply.
+    style_row = uigridlayout(info_gl, [1 4]);
+    style_row.ColumnWidth = {'fit', 58, 'fit', 58};
+    style_row.Padding = [0 0 0 0];
+    style_row.ColumnSpacing = 4;
+    uilabel(style_row, 'Text', ['Line ' char(215)], 'FontWeight', 'bold');
+    S.sp_linew = uispinner(style_row, 'Limits', [0.25 5], 'Step', 0.25, ...
+        'Value', 1, 'ValueDisplayFormat', '%g', ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V), ...
+        'Tooltip', ['Multiplies the width of every drawn line ' ...
+                    '(1 = default; also thickens outlined marker edges)']);
+    uilabel(style_row, 'Text', ['Pt ' char(215)], 'FontWeight', 'bold');
+    S.sp_ptsz = uispinner(style_row, 'Limits', [0.25 5], 'Step', 0.25, ...
+        'Value', 1, 'ValueDisplayFormat', '%g', ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V), ...
+        'Tooltip', ['Multiplies the phase marker size and the ' ...
+                    'hour-color dot size (1 = default)']);
+    S.style_row = style_row;
+    S.style_row.Visible = 'off';
 
     % Units switch — shown only for the 'Calib: Power ratio (NS / L)' view.
     units_row = uigridlayout(info_gl, [1 2]);
