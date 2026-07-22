@@ -154,7 +154,7 @@ function soop_viewer_render_l2(V, kind)
                 show_msg(msg);
                 return;
             end
-            tod_note = [' — daily @ ' char(tgt, 'hh:mm') ' ' char(177) '1 h'];
+            tod_note = [' — daily @ ' char(tgt, 'hh:mm')];
         else
             TC = CAND(tcol(CAND) >= t0 & tcol(CAND) < t1, :);
             if isempty(TC)
