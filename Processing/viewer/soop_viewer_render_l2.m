@@ -211,13 +211,20 @@ function soop_viewer_render_l2(V, kind)
         % Depth and temperature always plot at raw 15-min resolution; the agg
         % dropdown only applies to the phase line.
         agg_wx = 'Raw captures';
+        % Hour-of-day coloring predicate (also gates the checkbox Enable in
+        % the callbacks) — needed BEFORE axes creation because the hour bar
+        % reserves a bottom strip in the geometry plan.
+        hour_on = S.cb_hourcolor.Value && ~S.cb_tod.Value && ...
+                  any(strcmp(agg, {'Raw captures', 'Per-run mean'}));
 
-        % Fixed-position axes (not tiledlayout) so the optional temperature
-        % overlay can be placed deterministically — no mid-render drawnow,
-        % no reading of dynamic axes limits/position. Reserve a right margin
-        % for the temperature ruler only when a temperature line is shown.
-        if want_temp, axW = 0.74; else, axW = 0.86; end
-        ax_pos = [0.09 0.13 axW 0.80];
+        % Fixed-position axes (not tiledlayout) so every overlay is placed
+        % deterministically — no mid-render drawnow, no reading of dynamic
+        % axes limits/position. wx_axes_plan owns the geometry: right-ruler
+        % ownership (depth in meters when shown, else SWE in mm), the SWE
+        % overlay slot when both series are shown, the temperature slot,
+        % and the manual hour-colorbar strip.
+        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, hour_on);
+        ax_pos = P.ax_pos;
         ax  = axes(S.panel, 'Position', ax_pos);
         hold(ax, 'on');   % depth + legend proxies share ax's right side
         leg = {};  lh = gobjects(0);   % legend labels + handles, built as drawn
@@ -246,21 +253,25 @@ function soop_viewer_render_l2(V, kind)
         lh(end+1) = h_phase;
         st_pts(end+1) = h_phase;    % markers scale by Pt x (incl. phaseLine)
         st_lines(end+1) = h_phase;  % the joined phaseLine scales by Line x
-        % Hour-of-day coloring: the render re-checks the FULL predicate (a
+        % Hour-of-day coloring (hour_on computed with the geometry plan, a
         % checked-but-disabled box draws nothing). Colors derive from the
         % SAME aggregate the displayed points use (Raw captures / Per-run
         % mean keep hour identity via the group-midpoint timestamp); the
         % plot_series handle keeps its phaseLine line / error bars but
         % hides its own markers so the colored scatter reads.
-        hour_on = S.cb_hourcolor.Value && ~S.cb_tod.Value && ...
-                  any(strcmp(agg, {'Raw captures', 'Per-run mean'}));
         if hour_on
             [ta_h, ya_h] = M.aggregate(tcol(TC), y_ph, agg, 'phase');
             h_phase.Marker = 'none';
             hsc = scatter(ax, ta_h, ya_h, 36, V.U.hour_bins(ta_h) + 0.5, 'filled');
             colormap(ax, hsv(24));           % cyclic map for a cyclic hour
             clim(ax, [0 24]);
-            hcb = colorbar(ax, 'southoutside');  % below the plot box
+            hcb = colorbar(ax, 'southoutside');
+            % Pin the bar to the plan's reserved strip: setting Position
+            % switches the colorbar to manual layout, and restoring ax_pos
+            % undoes the auto-shrink — otherwise later overlay axes (built
+            % from ax_pos) would misalign with the shrunken ax.
+            hcb.Position = P.cb_pos;
+            ax.Position = ax_pos;
             hcb.Ticks = (0:4:20) + 0.5;      % bin centers — there is no hour 24
             hcb.TickLabels = compose('%d', 0:4:20);
             hcb.Label.String = 'nearest hour (capture timebase)';
@@ -289,40 +300,50 @@ function soop_viewer_render_l2(V, kind)
                 leg{end+1} = ['Air Temp > 0' char(176) 'C'];
             end
         end
-        % Right axis: SNOdar depth (red) and/or snow-scale SWE (teal). With
-        % SWE shown the shared ruler is in MILLIMETERS (the papers' SWE
-        % unit; depth joins as mm via R.dep_factor); depth-only keeps the
-        % meters ruler. Label/color/scaling/ylim come from the pure
-        % wx_right_axis helper (R.pad is unit-aware: 0.1 m vs 100 mm).
-        if show_dep || show_swe
+        % Right axis: independent rulers per series (each keeps its own
+        % units). SNOdar depth (red, METERS) owns the yyaxis ruler whenever
+        % shown; snow-scale SWE (teal, MILLIMETERS) owns it only when depth
+        % is off and otherwise moves to its own overlay axes in the inner
+        % reserved slot (built beside the temperature overlay below).
+        % Per-series label/color/ylim come from wx_axis_cfg (pad is
+        % unit-aware: 0.1 m vs 100 mm).
+        swe_ta = []; swe_pl = [];
+        if ~strcmp(P.right, 'none')
             yyaxis(ax, 'right');
-            dep_pl = []; swe_pl = [];
-            if show_dep, [~, dep_pl] = M.aggregate(tcol(TW), TW.depth_m, agg_wx, 'lin'); end
-            if show_swe, [~, swe_pl] = M.aggregate(tcol(TW), TW.swe_mm,  agg_wx, 'lin'); end
-            R = V.U.wx_right_axis(show_dep, show_swe, dep_pl, swe_pl);
+            own_vals = [];
             if show_dep
                 [ta, ya] = M.aggregate(tcol(TW), TW.depth_m, agg_wx, 'lin');
-                lh(end+1) = plot(ax, ta, ya * R.dep_factor, 'r-', ...
-                                 'LineWidth', 0.5);
+                own_vals = ya;                      % depth owns the ruler
+                lh(end+1) = plot(ax, ta, ya, 'r-', 'LineWidth', 0.5);
                 st_lines(end+1) = lh(end);
                 leg{end+1} = 'SNOdar depth';
             end
             if show_swe
                 [ta, ya] = M.aggregate(tcol(TW), TW.swe_mm, agg_wx, 'lin');
-                lh(end+1) = plot(ax, ta, ya, '-', 'Color', [0.00 0.60 0.45], ...
-                                 'LineWidth', 0.5);
+                if P.swe_ovl
+                    % Real SWE line lives on its overlay axes below; the
+                    % legend (parented to ax) binds a matching proxy.
+                    swe_ta = ta;  swe_pl = ya;
+                    lh(end+1) = plot(ax, [t0 t0], [NaN NaN], '-', ...
+                                     'Color', [0.00 0.60 0.45], 'LineWidth', 0.5);
+                else
+                    own_vals = ya;                  % SWE owns the ruler
+                    lh(end+1) = plot(ax, ta, ya, '-', ...
+                                     'Color', [0.00 0.60 0.45], 'LineWidth', 0.5);
+                end
                 st_lines(end+1) = lh(end);
                 leg{end+1} = 'SWE';
             end
-            ylabel(ax, R.label);
-            if isfinite(R.ymax), ylim(ax, [0, R.ymax * 1.1 + R.pad]); end
-            ax.YAxis(2).Color = R.color;
+            Ro = V.U.wx_axis_cfg(P.right, own_vals);
+            ylabel(ax, Ro.label);
+            if isfinite(Ro.ymax), ylim(ax, [0, Ro.ymax * 1.1 + Ro.pad]); end
+            ax.YAxis(2).Color = Ro.color;
             yyaxis(ax, 'left');   % restore left as active for title/labels
         end
         % yyaxis mode always draws a right ruler; hide it when nothing is
         % plotted on it (depth and SWE both off) so the figure has no bare
         % 0-1 axis on the right.
-        ax.YAxis(2).Visible = matlab.lang.OnOffSwitchState(show_dep || show_swe);
+        ax.YAxis(2).Visible = matlab.lang.OnOffSwitchState(~strcmp(P.right, 'none'));
 
         % Theoretical phase-from-SWE overlay (LEFT phase axis — active again
         % here; raw 15-min curve in EVERY agg mode, never aggregated; drawn
@@ -331,8 +352,7 @@ function soop_viewer_render_l2(V, kind)
         % the L2 rows matched to the displayed candidates by base_name
         % (fallback: finite L2 rows in range; none -> unavailable, drawn as
         % nothing). Anchoring/availability live in the pure theory_overlay
-        % helper; the legend carries the paper-sign and record-start-anchor
-        % labels.
+        % helper; the legend names the active mm-per-2pi rate.
         % Geometry-computed fringe rate and the auto/manual field latch
         % run on EVERY family render (not only when theory is checked) so
         % the mm/2pi field shows the actual auto value instead of a
@@ -379,8 +399,31 @@ function soop_viewer_render_l2(V, kind)
         % overlay axes is wider than ax to the right, with its XLim stretched
         % by the same ratio so the [t0,t1] data stays time-aligned with ax
         % while the temperature ruler sits in the reserved right margin.
+        % SWE overlay axes — SWE shares no scale with depth, so when both
+        % are shown SWE draws on its own transparent axes: wider than ax to
+        % the right with XLim stretched by the same ratio, keeping [t0,t1]
+        % data time-aligned while the teal mm ruler sits in the INNER
+        % reserved slot (temperatures take the outer slot).
+        % (Nonempty guard: the first datetime plot is what converts the
+        % fresh axes' numeric x-ruler, so the stretch xlim needs data.)
+        if P.swe_ovl && t1 > t0 && ~isempty(swe_ta)
+            ax_swe = axes(S.panel, 'Position', ...
+                          [ax_pos(1) ax_pos(2) P.swe_w ax_pos(4)], ...
+                          'Color', 'none', 'YAxisLocation', 'right', ...
+                          'XTick', [], 'Box', 'off', 'HitTest', 'off', ...
+                          'PickableParts', 'none');
+            hold(ax_swe, 'on');
+            Rs = V.U.wx_axis_cfg('swe', swe_pl);
+            st_lines(end+1) = plot(ax_swe, swe_ta, swe_pl, '-', ...
+                                   'Color', Rs.color, 'LineWidth', 0.5);
+            xlim(ax_swe, [t0, t0 + (t1 - t0) * (P.swe_w / ax_pos(3))]);
+            if isfinite(Rs.ymax), ylim(ax_swe, [0, Rs.ymax * 1.1 + Rs.pad]); end
+            ylabel(ax_swe, Rs.label);
+            ax_swe.YColor = Rs.color;
+        end
+
         if want_temp
-            tmp_w = axW + 0.06;
+            tmp_w = P.tmp_w;
             axT = axes(S.panel, 'Position', [ax_pos(1) ax_pos(2) tmp_w ax_pos(4)], ...
                        'Color', 'none', 'YAxisLocation', 'right', 'XTick', [], ...
                        'Box', 'off', 'HitTest', 'off', 'PickableParts', 'none');
@@ -409,7 +452,7 @@ function soop_viewer_render_l2(V, kind)
                 st_lines(end+1) = lh(end);   % proxy width matches the real line
                 leg{end+1} = esc(wxlab{2});
             end
-            xlim(axT, [t0, t0 + (t1 - t0) * (tmp_w / axW)]);
+            xlim(axT, [t0, t0 + (t1 - t0) * (tmp_w / ax_pos(3))]);
             % 0 degC melt-freeze threshold — a drawn line, so it scales too
             st_lines(end+1) = yline(axT, 0, ':', 'Color', [0.3 0.3 0.3], ...
                                     'LineWidth', 0.5);
@@ -418,7 +461,7 @@ function soop_viewer_render_l2(V, kind)
         end
 
         % Line x / Pt x spinners: multiply the product base styles once,
-        % across both axes (ax + axT), after the TOD marker bump and
+        % across all axes (ax + overlays), after the TOD marker bump and
         % before the legend binds its swatches.
         V.U.style_apply(V.U.style_factors(S.sp_linew.Value, S.sp_ptsz.Value), ...
                         st_lines, st_pts, st_dots);

@@ -1,7 +1,7 @@
 function tests = viewer_swe_phaseline_test
 % Tests for the L2: Candidates SWE overlay + phaseLine toggle: load_snodar's
 % snow-scale SWE QC chain (error-code mask, spike/support filter, optional-column
-% combinations, cfg.wx_swe_cols override, row alignment), the pure wx_right_axis
+% combinations, cfg.wx_swe_cols override, row alignment), the pure wx_axis_cfg
 % helper, and the graphics assumptions the render relies on (LineStyle
 % toggling, overlay color separation, row-1 pixel budget).
 % Run: matlab -batch "soop_setup_paths; addpath('tests'); runtests('viewer_swe_phaseline_test')"
@@ -220,38 +220,136 @@ function test_row_alignment_after_bad_ts(tc)
 end
 
 
-% ------------------------------------------------------------- wx_right_axis
+% ------------------------------------------- wx_axis_cfg / wx_axes_plan
 
-function test_wx_right_axis_matrix(tc)
-    % Depth-only keeps today's meters/red contract; any SWE display flips
-    % the shared ruler to mm (depth joins via dep_factor 1000) with the
-    % unit-aware ylim padding (0.1 m vs 100 mm).
+function test_wx_axis_cfg(tc)
+    % Per-series contract: depth in meters/red (pad 0.1), SWE in mm/teal
+    % (pad 100); ymax = max FINITE value clamped >= 0 (Inf discarded), NaN
+    % when nothing finite; char/string selectors; unknown selector errors.
     U = tc.TestData.U;
-    dep = [1; 3.8; NaN];  swe = [200; 1400; NaN];   % swe now in mm
-    R = U.wx_right_axis(true, false, dep, swe);
-    verifyTrue(tc, R.active);
+    R = U.wx_axis_cfg('depth', [1; 3.8; NaN]);
     verifyEqual(tc, R.label, 'Snow depth (m)');
-    verifyEqual(tc, R.color, [0.8 0 0]);          % today's depth-only red
-    verifyEqual(tc, R.dep_factor, 1);
+    verifyEqual(tc, R.color, [0.8 0 0]);
     verifyEqual(tc, R.pad, 0.1);
     verifyEqual(tc, R.ymax, 3.8);
-    R = U.wx_right_axis(false, true, dep, swe);
+    R = U.wx_axis_cfg('swe', [200; 1400; NaN]);
     verifyEqual(tc, R.label, 'SWE [mm]');
-    verifyEqual(tc, R.color, [0.2 0.2 0.2]);
-    verifyEqual(tc, R.dep_factor, 1000);
+    verifyEqual(tc, R.color, [0.00 0.60 0.45]);   % matches the series line
     verifyEqual(tc, R.pad, 100);
     verifyEqual(tc, R.ymax, 1400);
-    R = U.wx_right_axis(true, true, dep, swe);
-    verifyEqual(tc, R.label, 'Snow depth / SWE [mm]');
-    verifyEqual(tc, R.ymax, 3800);                % depth in mm wins the max
-    R = U.wx_right_axis(false, false, dep, swe);
-    verifyFalse(tc, R.active);
-    verifyTrue(tc, isnan(R.ymax));
-    R = U.wx_right_axis(false, true, dep, zeros(3, 1));
-    verifyEqual(tc, R.ymax, 0);                   % all-zero SWE: the 100 mm
-    verifyEqual(tc, R.pad, 100);                  % pad keeps a usable ruler
-    R = U.wx_right_axis(true, false, [NaN; NaN], swe);
-    verifyTrue(tc, isnan(R.ymax), 'all-NaN shown series gives NaN ymax');
+    R = U.wx_axis_cfg("swe", [NaN; -Inf; 2; Inf]);   % string selector +
+    verifyEqual(tc, R.ymax, 2);                      % infinities discarded
+    R = U.wx_axis_cfg('swe', [NaN; Inf; -Inf]);
+    verifyTrue(tc, isnan(R.ymax), 'all-nonfinite gives NaN ymax');
+    R = U.wx_axis_cfg('swe', []);
+    verifyTrue(tc, isnan(R.ymax), 'empty gives NaN ymax');
+    R = U.wx_axis_cfg('swe', zeros(3, 1));
+    verifyEqual(tc, R.ymax, 0);                   % all-zero: pad keeps a
+    hi = R.ymax * 1.1 + R.pad;                    % usable increasing ruler
+    verifyGreaterThan(tc, hi, 0);
+    R = U.wx_axis_cfg('swe', [-500; -300]);
+    verifyEqual(tc, R.ymax, 0, 'negative-only SWE clamps to 0');
+    R = U.wx_axis_cfg('depth', [-2; -1]);
+    verifyEqual(tc, R.ymax, 0, 'negative-only depth clamps too');
+    verifyError(tc, @() U.wx_axis_cfg('temp', 1), 'soop:wx_axis_cfg:series');
+end
+
+function test_wx_axes_plan_matrix(tc)
+    % Production geometry/ownership matrix: the sole shown series owns the
+    % yyaxis right ruler; both shown -> depth keeps it and SWE gets the
+    % inner overlay slot; each overlay costs 0.12 of plot width (slots step
+    % out by 0.06); hour coloring reserves a bottom colorbar strip.
+    U = tc.TestData.U;
+    P = U.wx_axes_plan(false, false, false, false);
+    verifyEqual(tc, P.right, 'none');
+    verifyFalse(tc, P.swe_ovl);
+    verifyEqual(tc, P.ax_pos, [0.09 0.13 0.86 0.80]);
+    verifyTrue(tc, isempty(P.cb_pos));
+    P = U.wx_axes_plan(true, false, false, false);
+    verifyEqual(tc, P.right, 'depth');
+    verifyFalse(tc, P.swe_ovl);
+    verifyEqual(tc, P.ax_pos(3), 0.86);
+    P = U.wx_axes_plan(false, true, false, false);
+    verifyEqual(tc, P.right, 'swe');   % SWE owns the ruler when depth off
+    verifyFalse(tc, P.swe_ovl);
+    verifyEqual(tc, P.ax_pos(3), 0.86);
+    P = U.wx_axes_plan(true, true, false, false);
+    verifyEqual(tc, P.right, 'depth');
+    verifyTrue(tc, P.swe_ovl);
+    verifyEqual(tc, P.ax_pos(3), 0.74);
+    verifyEqual(tc, P.swe_w, 0.80, 'AbsTol', 1e-12);   % inner slot +0.06
+    P = U.wx_axes_plan(false, false, true, false);     % temps only
+    verifyEqual(tc, P.right, 'none');
+    verifyEqual(tc, P.ax_pos(3), 0.74);
+    verifyEqual(tc, P.tmp_w, 0.80, 'AbsTol', 1e-12);   % today's temp slot
+    P = U.wx_axes_plan(true, true, true, false);       % everything on
+    verifyEqual(tc, P.ax_pos(3), 0.62, 'AbsTol', 1e-12);
+    verifyEqual(tc, P.swe_w, 0.68, 'AbsTol', 1e-12);   % SWE inner
+    verifyEqual(tc, P.tmp_w, 0.74, 'AbsTol', 1e-12);   % temps outer
+    P = U.wx_axes_plan(true, true, true, true);        % + hour coloring
+    verifyEqual(tc, P.ax_pos, [0.09 0.25 0.62 0.68], 'AbsTol', 1e-12);
+    verifyEqual(tc, P.cb_pos, [0.09 0.11 0.62 0.04], 'AbsTol', 1e-12);
+end
+
+function test_overlay_colorbar_alignment(tc)
+    % Combined graphics contract built FROM the production plan: with the
+    % hour colorbar pinned to its reserved strip and ax restored, the main
+    % axes and both overlay axes share y/height, timestamps map to the
+    % same normalized x on every axes, ruler spines step outward in order,
+    % and default-font labels/ticks stay inside the panel.
+    U = tc.TestData.U;
+    P = U.wx_axes_plan(true, true, true, true);   % all overlays + hour bar
+    fig = uifigure('Visible', 'off', 'Position', [80 80 1200 620]);
+    cleanup = onCleanup(@() delete(fig));
+    pnl = uipanel(fig, 'Units', 'normalized', 'Position', [0 0 1 1]);
+    t0 = datetime(2026, 1, 1);  t1 = t0 + days(30);
+    ax = axes(pnl, 'Position', P.ax_pos);
+    scatter(ax, t0 + days(0:5), 1:6, 36, mod(0:5, 24) + 0.5, 'filled');
+    colormap(ax, hsv(24));  clim(ax, [0 24]);
+    hcb = colorbar(ax, 'southoutside');
+    hcb.Position = P.cb_pos;      % pin -> manual layout, stops auto-shrink
+    ax.Position = P.ax_pos;       % undo the shrink the colorbar caused
+    xlim(ax, [t0 t1]);
+    mk = @(w) axes(pnl, 'Position', [P.ax_pos(1) P.ax_pos(2) w P.ax_pos(4)], ...
+                   'Color', 'none', 'YAxisLocation', 'right', 'XTick', [], ...
+                   'Box', 'off', 'HitTest', 'off', 'PickableParts', 'none');
+    % Production order: a datetime line converts each fresh axes' numeric
+    % x-ruler BEFORE the stretched datetime xlim is applied.
+    ax_swe = mk(P.swe_w);
+    hold(ax_swe, 'on');
+    plot(ax_swe, [t0 t1], [0 1], '-');
+    xlim(ax_swe, [t0, t0 + (t1 - t0) * (P.swe_w / P.ax_pos(3))]);
+    ylabel(ax_swe, 'SWE [mm]');
+    axT = mk(P.tmp_w);
+    hold(axT, 'on');
+    plot(axT, [t0 t1], [0 1], '-');
+    xlim(axT, [t0, t0 + (t1 - t0) * (P.tmp_w / P.ax_pos(3))]);
+    ylabel(axT, 'Temperature');
+    drawnow;
+    % The pinned colorbar and restored ax positions must survive layout.
+    verifyEqual(tc, ax.Position, P.ax_pos, 'AbsTol', 1e-9);
+    verifyEqual(tc, hcb.Position, P.cb_pos, 'AbsTol', 1e-9);
+    % All plot axes share the vertical band (no overlay dips into the bar).
+    for h = [ax_swe axT]
+        verifyEqual(tc, h.Position([2 4]), P.ax_pos([2 4]), 'AbsTol', 1e-9);
+    end
+    % Time alignment: t0 and t1 land on the same normalized x everywhere.
+    xn = @(h, t) h.Position(1) + days(t - h.XLim(1)) / days(diff(h.XLim)) ...
+                 * h.Position(3);
+    for t = [t0 t1]
+        verifyEqual(tc, xn(ax_swe, t), xn(ax, t), 'AbsTol', 1e-9);
+        verifyEqual(tc, xn(axT,   t), xn(ax, t), 'AbsTol', 1e-9);
+    end
+    % Ruler spines step outward with the slot spacing, and the outermost
+    % ruler's default-font ticks/label stay inside the panel.
+    e_ax  = ax.Position(1) + ax.Position(3);
+    e_swe = ax_swe.Position(1) + ax_swe.Position(3);
+    e_tmp = axT.Position(1) + axT.Position(3);
+    verifyGreaterThanOrEqual(tc, e_swe - e_ax,  0.05);
+    verifyGreaterThanOrEqual(tc, e_tmp - e_swe, 0.05);
+    ti = axT.TightInset;
+    verifyLessThanOrEqual(tc, e_tmp + ti(3), 1.0, ...
+        'outer ruler ticks/label overflow the panel');
 end
 
 
@@ -393,18 +491,6 @@ function test_theory_overlay_wrap_boundary_and_negative(tc)
     verifyEqual(tc, O.phi_deg(2), -180, 'AbsTol', 1e-9);
     O = U.theory_overlay(d, 0, wt, [100; 50], 'first', 400);  % melt: -45 deg
     verifyEqual(tc, O.phi_deg(2), -45, 'AbsTol', 1e-9);
-end
-
-function test_wx_right_axis_negative_only(tc)
-    % Finding-3 contract: a negative-only shown series clamps ymax to 0 so
-    % the render's [0, ymax*1.1 + pad] limit stays increasing ([0, pad]).
-    U = tc.TestData.U;
-    R = U.wx_right_axis(false, true, [], [-500; -300]);
-    verifyEqual(tc, R.ymax, 0);
-    hi = R.ymax * 1.1 + R.pad;
-    verifyGreaterThan(tc, hi, 0);
-    R = U.wx_right_axis(true, false, [-2; -1], []);
-    verifyEqual(tc, R.ymax, 0, 'depth-only clamps too');
 end
 
 function test_fringe_pick(tc)

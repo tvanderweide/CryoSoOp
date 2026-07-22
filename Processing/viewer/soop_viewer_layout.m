@@ -42,8 +42,8 @@ function soop_viewer_layout(V)
     uibutton(r1, 'Text', 'Reload',      'ButtonPushedFcn', @(~,~) V.CB.on_reload(V));
     uibutton(r1, 'Text', 'Export PNG',  'ButtonPushedFcn', @(~,~) V.CB.on_export(V));
     % Weather-overlay toggles for the L2: Candidates views (shown only there):
-    % snow depth + snow-scale SWE (shared right meters axis) + the two
-    % station temperatures (own overlay axis).
+    % snow depth (right axis, m) + snow-scale SWE (independent axis, mm) +
+    % the two station temperatures (own overlay axis).
     S.cb_depth = uicheckbox(r1, 'Text', 'Snow depth', 'Value', true, ...
                             'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.cb_swe   = uicheckbox(r1, 'Text', 'SWE', 'Value', false, ...

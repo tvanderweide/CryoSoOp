@@ -3,7 +3,7 @@ function U = soop_viewer_util()
 % handles (same idiom as rfi_excise/BrundageSoOp_fun); each takes V first
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
 % parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/freeze_spans/
-% wx_right_axis/snrcut_usable/snrcut_apply/snrcut_start/wx_temp_labels/
+% wx_axis_cfg/wx_axes_plan/snrcut_usable/snrcut_apply/snrcut_start/wx_temp_labels/
 % swe_per_fringe_mm/fringe_pick/fringe_latch/theory_overlay/is_cand_kind/
 % hour_bins/style_factors/style_apply/src_desc/open_fun).
     U.range_bounds = @range_bounds;
@@ -37,7 +37,8 @@ function U = soop_viewer_util()
     U.phoff_prep = @phoff_prep;
     U.phoff_title = @phoff_title;
     U.freeze_spans = @freeze_spans;
-    U.wx_right_axis = @wx_right_axis;
+    U.wx_axis_cfg = @wx_axis_cfg;
+    U.wx_axes_plan = @wx_axes_plan;
     U.snrcut_usable = @snrcut_usable;
     U.snrcut_apply = @snrcut_apply;
     U.snrcut_start = @snrcut_start;
@@ -928,44 +929,69 @@ function spans = freeze_spans(t, y)
 end
 
 
-function R = wx_right_axis(show_dep, show_swe, dep_m, swe_mm)
-% Right-axis plan for the L2: Candidates depth/SWE overlay. Depth-only
-% keeps today's meters ruler; whenever SWE is shown the shared ruler is in
-% MILLIMETERS (the papers' SWE unit) and depth joins as mm via dep_factor,
-% so one ruler serves both (0-4000 mm depth vs 0-1400 mm SWE, same order).
-% Pure and testable. Returns struct R:
-%   .active     — right axis drawn at all (either series shown)
-%   .label      — 'Snow depth (m)' / 'SWE [mm]' / 'Snow depth / SWE [mm]'
-%   .color      — ruler color: depth red when depth-only (today's look),
-%                 neutral dark whenever SWE is shown
-%   .dep_factor — multiply depth_m by this before plotting (1 in meters
-%                 mode, 1000 in mm mode)
-%   .pad        — unit-aware ylim padding (0.1 m / 100 mm) — the render's
-%                 upper limit is R.ymax*1.1 + R.pad
-%   .ymax       — max over the SHOWN series, in AXIS units (NaN when none
-%                 finite)
-    R.active = show_dep || show_swe;
-    if show_dep && show_swe
-        R.label = 'Snow depth / SWE [mm]';
+function R = wx_axis_cfg(series, vals)
+% Per-series right-ruler plan for the candidates weather overlays — each
+% series keeps its own units, label, and color (independent axes):
+%   'depth' — meters, red,  pad 0.1 m
+%   'swe'   — mm,     teal, pad 100 mm
+% Accepts char or string selectors; unknown selectors error
+% (soop:wx_axis_cfg:series). R.ymax is the max over FINITE values only
+% (Inf/-Inf discarded), clamped >= 0 so a negative-only series (QC can
+% retain a stable negative SWE) never produces a decreasing ylim; NaN when
+% nothing finite. The render's ruler is ylim [0, R.ymax*1.1 + R.pad].
+    switch char(series)
+        case 'depth'
+            R = struct('label', 'Snow depth (m)', 'color', [0.8 0 0], ...
+                       'pad', 0.1);
+        case 'swe'
+            R = struct('label', 'SWE [mm]', 'color', [0.00 0.60 0.45], ...
+                       'pad', 100);
+        otherwise
+            error('soop:wx_axis_cfg:series', ...
+                  'Unknown weather series ''%s''.', char(series));
+    end
+    v = vals(isfinite(vals));
+    if isempty(v)
+        R.ymax = NaN;
+    else
+        R.ymax = max(max(v), 0);
+    end
+end
+
+
+function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on)
+% Deterministic axes/colorbar geometry + right-ruler ownership for the
+% candidates figure (normalized panel units; the render never reads live
+% Position values):
+%   .right   — 'depth' | 'swe' | 'none': series owning the yyaxis ruler
+%              (depth when shown; SWE only when depth is off)
+%   .swe_ovl — SWE needs its own overlay axes (both series shown)
+%   .ax_pos  — main axes [x y w h]; a bottom strip is reserved for the
+%              hour-color bar when hour_on
+%   .cb_pos  — manual hour-colorbar strip ([] when hour_on is false);
+%              pinning the colorbar Position stops MATLAB's auto-layout
+%              from shrinking ax after ax_pos was chosen
+%   .swe_w / .tmp_w — overlay axes widths: ruler slots step out by SLOT_W
+%              (SWE inner, temperatures outer)
+    P.swe_ovl = show_dep && show_swe;
+    if show_dep
+        P.right = 'depth';
     elseif show_swe
-        R.label = 'SWE [mm]';
+        P.right = 'swe';
     else
-        R.label = 'Snow depth (m)';
+        P.right = 'none';
     end
-    if show_swe
-        R.color = [0.2 0.2 0.2];  R.dep_factor = 1000;  R.pad = 100;
+    SLOT_W = 0.06;   % per-ruler right-margin slot (spine-to-spine gap)
+    axW = 0.86 - 2 * SLOT_W * (double(P.swe_ovl) + double(want_temp));
+    if hour_on
+        P.ax_pos = [0.09 0.25 axW 0.68];
+        P.cb_pos = [0.09 0.11 axW 0.04];
     else
-        R.color = [0.8 0 0];      R.dep_factor = 1;     R.pad = 0.1;
+        P.ax_pos = [0.09 0.13 axW 0.80];
+        P.cb_pos = [];
     end
-    vals = [];
-    if show_dep, vals = [vals; dep_m(:) * R.dep_factor]; end
-    if show_swe, vals = [vals; swe_mm(:)]; end
-    R.ymax = max(vals, [], 'omitnan');
-    if isempty(R.ymax), R.ymax = NaN; end
-    % The render's lower limit is pinned at 0, so a negative-only series
-    % (QC can retain a stable negative SWE) must not produce a decreasing
-    % ylim — clamp the finite maximum to >= 0 ([0, pad] ruler).
-    if isfinite(R.ymax), R.ymax = max(R.ymax, 0); end
+    P.swe_w = axW + SLOT_W;
+    P.tmp_w = axW + SLOT_W * (1 + double(P.swe_ovl));
 end
 
 
