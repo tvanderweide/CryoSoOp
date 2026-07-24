@@ -727,7 +727,9 @@ end
 function test_is_cand_kind(tc)
     U = tc.TestData.U;
     for k = {'L2: Sensor data', 'L2: Candidates — MUOS-1 (38093)', ...
-             'L2: Candidates — MUOS-5 (41622)'}
+             'L2: Candidates — MUOS-5 (41622)', ...
+             'L2: Candidates Unwrapped — MUOS-1 (38093)', ...
+             'L2: Candidates Unwrapped — MUOS-5 (41622)'}
         verifyTrue(tc, U.is_cand_kind(k{1}), k{1});
         verifyTrue(tc, U.plot_uses_domain(k{1}), k{1});
     end
@@ -999,7 +1001,7 @@ function test_style_layout_and_gating(tc)
     V.calib_base_cache  = struct('dir', "", 'T', table());
     V.calib_notch_cache = struct('dir', "", 'T', table());
     V.busy = false;  V.pending = false;  V.last_n = 0;
-    V.OVF = strings(0, 1);
+    V.OVF = strings(0, 1);  V.OVF_ok = false;  V.OVF_src = "";
     V.cap_folders = containers.Map('KeyType', 'char', 'ValueType', 'char');
     V.ov_title = '';  V.ov_xlabel = '';  V.ov_ylabel = '';
     V.ov_plot_kind = '';
@@ -1016,26 +1018,37 @@ function test_style_layout_and_gating(tc)
     verifyEqual(tc, V.sp_linew.Step, 0.25);
     verifyEqual(tc, V.sp_ptsz.Step, 0.25);
 
-    % Placement: directly under the legend row; grid has 19 x 28 px control
+    % Placement: directly under the legend row; grid has 20 x 28 px control
     % rows before the two 56 px sub-grid rows.
     g = V.style_row.Parent;
     verifyEqual(tc, V.style_row.Layout.Row, ...
                 V.dd_legend.Parent.Layout.Row + 1);
-    verifyNumElements(tc, g.RowHeight, 29);
-    verifyEqual(tc, [g.RowHeight{1:19}], repmat(28, 1, 19));
-    verifyEqual(tc, [g.RowHeight{20:21}], [56 56]);
+    verifyNumElements(tc, g.RowHeight, 30);
+    verifyEqual(tc, [g.RowHeight{1:20}], repmat(28, 1, 20));
+    verifyEqual(tc, [g.RowHeight{21:22}], [56 56]);
+
+    % Overflow filter row: built directly under the SNR-cutoff row,
+    % unchecked by default (include + mark, never a silent filter change).
+    verifyEqual(tc, V.ovf_row.Layout.Row, V.snrcut_row.Layout.Row + 1);
+    verifyFalse(tc, logical(V.cb_ovf.Value));
 
     % Hidden at build; the production family gate shows/hides it with the
-    % other candidates rows; spinner values persist across the flip.
+    % other candidates rows; spinner values and the overflow checkbox
+    % persist across the flip.
     verifyFalse(tc, logical(V.style_row.Visible));
+    verifyFalse(tc, logical(V.ovf_row.Visible));
     V.CB.set_family_rows(V, true);
     verifyTrue(tc, logical(V.style_row.Visible));
     verifyTrue(tc, logical(V.hour_row.Visible));
     verifyTrue(tc, logical(V.cb_swe.Visible));
+    verifyTrue(tc, logical(V.ovf_row.Visible));
     V.sp_linew.Value = 2.5;  V.sp_ptsz.Value = 0.5;
+    V.cb_ovf.Value = true;
     V.CB.set_family_rows(V, false);
     verifyFalse(tc, logical(V.style_row.Visible));
+    verifyFalse(tc, logical(V.ovf_row.Visible));
     V.CB.set_family_rows(V, true);
     verifyEqual(tc, V.sp_linew.Value, 2.5);
     verifyEqual(tc, V.sp_ptsz.Value, 0.5);
+    verifyTrue(tc, logical(V.cb_ovf.Value));
 end

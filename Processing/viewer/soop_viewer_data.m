@@ -38,22 +38,12 @@ function load_csvs(V)
         end
     end
     % Overflow-flagged capture bases (optional; from find_overflows.m).
-    % Prefer cfg.overflow_file (stable season input, decoupled from out_dir);
-    % else fall back to the per-method dir then the base dir.
-    S.OVF = strings(0, 1);
-    if isfield(cfg, 'overflow_file') && ~isempty(cfg.overflow_file) ...
-            && isfile(cfg.overflow_file)
-        ovf_file = cfg.overflow_file;
-    else
-        ovf_file = fullfile(cfg.out_dir, 'overflow_timestamps.txt');
-        if ~isfile(ovf_file) && ~isempty(S.base_out_dir)
-            ovf_file = fullfile(S.base_out_dir, 'overflow_timestamps.txt');  % shared input
-        end
-    end
-    if isfile(ovf_file)
-        S.OVF = strtrim(readlines(ovf_file));
-        S.OVF = S.OVF(strlength(S.OVF) > 0);
-    end
+    % ovf_load owns the path precedence (cfg.overflow_file, then the
+    % per-method dir, then the base dir). OVF_ok records whether a list
+    % file was FOUND — it gates the candidates-family overflow checkbox
+    % (an empty list is a valid "no overflows"); OVF_src keeps the
+    % resolved path for the checkbox tooltip.
+    [S.OVF, S.OVF_ok, S.OVF_src] = V.U.ovf_load(cfg, S.base_out_dir);
 end
 
 

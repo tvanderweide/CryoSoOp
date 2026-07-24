@@ -23,14 +23,14 @@ end
 
 function set_family_rows(V, is_cand)
 % Show/hide the satellite-candidates-family controls: the row-1 weather
-% checkboxes and the side-panel daily/phaseLine/SNR/theory/fringe/hour/
-% style rows. Pure visibility — Enable states and the domain snap stay in
+% checkboxes and the side-panel daily/phaseLine/SNR/overflow/theory/
+% fringe/hour/style rows. Pure visibility — Enable states and the domain snap stay in
 % render_now. Callable headlessly (layout tests exercise the real gating).
     S = V;
     on = matlab.lang.OnOffSwitchState(is_cand);
     set([S.cb_depth, S.cb_swe, S.cb_airtc, S.cb_tempc, S.cb_abvfrz], ...
         'Visible', on);
-    set([S.tod_row, S.phline_row, S.snrcut_row, S.theory_row, ...
+    set([S.tod_row, S.phline_row, S.snrcut_row, S.ovf_row, S.theory_row, ...
          S.fringe_row, S.hour_row, S.style_row], 'Visible', on);
 end
 
@@ -400,8 +400,9 @@ function render_now(V)
     end
 
     % Weather-overlay toggles and the family side-panel rows apply only to
-    % the satellite-candidates family (the two MUOS views + Sensor data);
-    % the visibility set lives in set_family_rows (shared with tests).
+    % the satellite-candidates family (the MUOS candidate views, wrapped
+    % and unwrapped, + Sensor data); the visibility set lives in
+    % set_family_rows (shared with tests).
     is_cand = V.U.is_cand_kind(kind);
     set_family_rows(V, is_cand);
     if is_cand
@@ -424,6 +425,27 @@ function render_now(V)
         % snr_db (S.CAND follows the Dataset dropdown, so re-check every
         % render). Products without snr_db disable the control.
         S.sp_snrcut.Enable = matlab.lang.OnOffSwitchState(V.U.snrcut_usable(S.CAND));
+        % Overflow filter needs a found overflow list AND a base_name column
+        % in the loaded candidate product; the tooltip names the resolved
+        % list so the active source is visible (fail-visible when disabled).
+        ovf_ok = V.U.ovf_usable(S.CAND, S.OVF_ok);
+        S.cb_ovf.Enable = matlab.lang.OnOffSwitchState(ovf_ok);
+        % Each disabled state names its own cause (fail-visible): a missing
+        % list and an unusable product schema need different operator fixes.
+        if ~S.OVF_ok
+            src_note = 'No overflow list found (run find_overflows).';
+        elseif ~ovf_ok
+            src_note = ['Disabled: the loaded candidate product has no ' ...
+                        'usable base_name column (regenerate it). Source: ' ...
+                        char(S.OVF_src)];
+        else
+            src_note = ['Source: ' char(S.OVF_src)];
+        end
+        S.cb_ovf.Tooltip = ['Drop overflow-flagged captures (find_overflows ' ...
+            'list) from the candidate selection before the daily pick; ' ...
+            'unchecked leaves them in and marks them as red ''Overflow'' ' ...
+            'points (Raw captures; aggregated modes note the included count ' ...
+            'in the title). ' src_note];
     end
 
     % Expand the RFI control row for both season RFI views. The interactive

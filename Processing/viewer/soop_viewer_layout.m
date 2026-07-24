@@ -142,12 +142,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [29 1]);
+    info_gl = uigridlayout(r3, [30 1]);
     % Rows 20/21 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
     % The 28 px control rows are children 1-19 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -306,8 +306,8 @@ function soop_viewer_layout(V)
     S.detrend_row = detrend_row;
     S.detrend_row.Visible = 'off';
 
-    % Daily time-of-day filter — shown only for the three 'L2: Candidates'
-    % views. When ticked, each target day keeps one capture: the one nearest
+    % Daily time-of-day filter — shown only on the candidates-family views.
+    % When ticked, each target day keeps one capture: the one nearest
     % the entered time (H, HHMM, or HH:MM; capture/Pi clock); days whose
     % nearest capture is over 1 h away are dropped (TOD_WINDOW in
     % soop_viewer_render_l2).
@@ -324,7 +324,7 @@ function soop_viewer_layout(V)
     S.tod_row = tod_row;
     S.tod_row.Visible = 'off';
 
-    % phaseLine — shown only on the three 'L2: Candidates' views. Governs the
+    % phaseLine — shown only on the candidates-family views. Governs the
     % phase series' connecting line in EVERY aggregation mode: unchecked =
     % markers only (scatter), checked = markers joined by a line (aggregated
     % modes keep their error bars either way).
@@ -335,7 +335,7 @@ function soop_viewer_layout(V)
     S.phline_row = phline_row;
     S.phline_row.Visible = 'off';
 
-    % SNR display cutoff — shown only on the three 'L2: Candidates' views.
+    % SNR display cutoff — shown only on the candidates-family views.
     % Filters the DISPLAYED candidates with the producer's exact predicate
     % (isfinite(snr_db) & snr_db >= cut); rows below the pipeline scoring
     % threshold never reached the CSV, so lowering below the configured
@@ -362,6 +362,28 @@ function soop_viewer_layout(V)
     uilabel(snrcut_row, 'Text', 'dB', 'FontWeight', 'bold');
     S.snrcut_row = snrcut_row;
     S.snrcut_row.Visible = 'off';
+
+    % Overflow display filter — shown only on the candidates-family views.
+    % Checked: overflow-flagged captures (base_name in the find_overflows
+    % list) are removed from the display selection BEFORE the date/daily
+    % pick, so a day's representative swaps to the nearest clean capture.
+    % Unchecked: they stay in the calculation and are marked as red
+    % 'Overflow' points (Raw captures aggregation; aggregated modes note
+    % the included count in the title). render_now appends the resolved
+    % list path to this tooltip and disables the box when no list was
+    % found or the product has no base_name column.
+    ovf_row = uigridlayout(info_gl, [1 1]);
+    ovf_row.Padding = [0 0 0 0];
+    S.cb_ovf = uicheckbox(ovf_row, 'Text', 'Exclude overflow captures', ...
+        'Value', false, ...
+        'Tooltip', ['Drop overflow-flagged captures (find_overflows list) ' ...
+                    'from the candidate selection before the daily pick; ' ...
+                    'unchecked leaves them in and marks them as red ' ...
+                    '''Overflow'' points. Disabled = no overflow list found ' ...
+                    'or no base_name column.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.ovf_row = ovf_row;
+    S.ovf_row.Visible = 'off';
 
     % Theoretical phase-from-SWE overlay (candidate control block, directly
     % after the SNR cutoff — NOT the calibration snr_row above). Checkbox

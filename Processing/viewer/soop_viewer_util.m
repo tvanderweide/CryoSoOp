@@ -4,8 +4,8 @@ function U = soop_viewer_util()
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
 % parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/freeze_spans/
 % wx_axis_cfg/wx_axes_plan/snrcut_usable/snrcut_apply/snrcut_start/wx_temp_labels/
-% swe_per_fringe_mm/fringe_pick/fringe_latch/theory_overlay/is_cand_kind/
-% hour_bins/style_factors/style_apply/src_desc/open_fun).
+% swe_per_fringe_mm/fringe_pick/fringe_latch/theory_overlay/unwrap_deg/
+% is_cand_kind/hour_bins/style_factors/style_apply/src_desc/open_fun).
     U.range_bounds = @range_bounds;
     U.apply_overrides = @apply_overrides;
     U.style_legend = @style_legend;
@@ -42,11 +42,15 @@ function U = soop_viewer_util()
     U.snrcut_usable = @snrcut_usable;
     U.snrcut_apply = @snrcut_apply;
     U.snrcut_start = @snrcut_start;
+    U.ovf_load = @ovf_load;
+    U.ovf_mask = @ovf_mask;
+    U.ovf_usable = @ovf_usable;
     U.wx_temp_labels = @wx_temp_labels;
     U.swe_per_fringe_mm = @swe_per_fringe_mm;
     U.fringe_pick = @fringe_pick;
     U.fringe_latch = @fringe_latch;
     U.theory_overlay = @theory_overlay;
+    U.unwrap_deg = @unwrap_deg;
     U.is_cand_kind = @is_cand_kind;
     U.hour_bins = @hour_bins;
     U.style_factors = @style_factors;
@@ -424,9 +428,10 @@ end
 
 
 function tf = is_cand_kind(kind)
-% The satellite-candidates figure family: the two MUOS candidate views plus
-% 'L2: Sensor data'. One predicate keeps render dispatch, side-panel
-% control visibility, and the Phase-domain gating can never disagree.
+% The satellite-candidates figure family: the MUOS candidate views (wrapped
+% and unwrapped) plus 'L2: Sensor data'. One predicate keeps render
+% dispatch, side-panel control visibility, and the Phase-domain gating from
+% ever disagreeing.
     tf = startsWith(kind, 'L2: Candidates') || strcmp(kind, 'L2: Sensor data');
 end
 
@@ -1036,7 +1041,7 @@ function [mm, manual] = fringe_pick(txt, auto_mm)
 end
 
 
-function O = theory_overlay(cand_t, cand_phi, wx_t, wx_swe, mode, fringe_mm)
+function O = theory_overlay(cand_t, cand_phi, wx_t, wx_swe, mode, fringe_mm, wrap_out)
 % Theoretical differential-phase overlay for the L2: Candidates figures:
 % the snow-scale SWE record converted to phase via the fringe rate, anchored
 % to a MEASURED phase reference so it overlays the plotted points (the
@@ -1049,9 +1054,15 @@ function O = theory_overlay(cand_t, cand_phi, wx_t, wx_swe, mode, fringe_mm)
 %                     season-level anchor must not move with the date range)
 %   mode            — 'swe0' (snow-free start) | 'first' (first shown)
 %   fringe_mm       — swe_per_fringe_mm output
+%   wrap_out        — optional (default true): wrap the output to ±180 for
+%                     the wrapped views; false leaves the curve continuous
+%                     across fringes for the unwrapped views. Scalar logical
+%                     or numeric 0/1 only (caller-bug error otherwise:
+%                     soop_viewer_util:theory_overlay:wrap_out).
 % Contract:
 %   phi(t) = wrap180(phase_ref + 360*(SWE(t) - SWE_anchor)/fringe_mm) at
-%   EVERY non-NaT weather timestamp — O.t keeps the full chronology and
+%   EVERY non-NaT weather timestamp (wrap180 skipped when wrap_out is
+%   false) — O.t keeps the full chronology and
 %   invalid-SWE rows return NaN phase, so the drawn line BREAKS across
 %   sensor/QC gaps instead of bridging them. Raw 15-min curve in every agg
 %   mode (never aggregated), paper-positive sign (legend labels it).
@@ -1072,6 +1083,13 @@ function O = theory_overlay(cand_t, cand_phi, wx_t, wx_swe, mode, fringe_mm)
     if ~any(strcmp(mode, {'swe0', 'first'}))
         error('soop_viewer_util:theory_overlay:mode', ...
               'theory_overlay: unknown mode "%s".', mode);
+    end
+    if nargin < 7
+        wrap_out = true;
+    elseif ~(isscalar(wrap_out) && (islogical(wrap_out) || ...
+             (isnumeric(wrap_out) && isreal(wrap_out) && any(wrap_out == [0 1]))))
+        error('soop_viewer_util:theory_overlay:wrap_out', ...
+              'theory_overlay: wrap_out must be a scalar logical or 0/1.');
     end
     if ~(isnumeric(fringe_mm) && isscalar(fringe_mm) && isreal(fringe_mm) && ...
          isfinite(fringe_mm) && fringe_mm > 0)
@@ -1125,8 +1143,41 @@ function O = theory_overlay(cand_t, cand_phi, wx_t, wx_swe, mode, fringe_mm)
     end
     O.t = tw;
     O.phi_deg = nan(n, 1);
-    O.phi_deg(val) = wrap_deg(phase_ref + 360 * (sw(val) - swe_anchor) / fringe_mm);
+    O.phi_deg(val) = phase_ref + 360 * (sw(val) - swe_anchor) / fringe_mm;
+    if wrap_out
+        O.phi_deg(val) = wrap_deg(O.phi_deg(val));
+    end
     O.ok = true;
+end
+
+
+function u = unwrap_deg(t, y_deg)
+% Unwrap a wrapped-degree series along its timestamps: sorts by time
+% (stable — equal timestamps keep input order), unwraps the finite samples
+% with MATLAB unwrap's branch rule (an absolute jump STRICTLY greater than
+% 180° between consecutive kept samples is folded by ±360°; exactly ±180°
+% is preserved), and returns values in the INPUT order with the shape of
+% y_deg. NaN/Inf samples and NaT
+% timestamps come back as NaN and do NOT break the branch — the unwrap
+% continues across data gaps of any length, so one ambiguous post-gap
+% transition (true phase change > 180° between kept samples) shifts every
+% later value by n*360°. Display-side transform only (product CSVs stay
+% wrapped). Row-order invariance holds only while the finite timestamps
+% are distinct. Pure — headlessly testable. Length mismatch is a caller
+% bug: soop:unwrap_deg:length.
+    if numel(t) ~= numel(y_deg)
+        error('soop:unwrap_deg:length', ...
+              'unwrap_deg: t and y_deg must have equal lengths.');
+    end
+    u  = nan(size(y_deg));
+    tv = t(:);
+    yv = double(y_deg(:));                 % columnize: row input stays 1-D
+    [~, ord] = sort(tv);                   % stable: ties keep input order
+    ys = yv(ord);
+    f  = isfinite(ys) & ~isnat(tv(ord));
+    ys(f)  = rad2deg(unwrap(deg2rad(ys(f))));
+    ys(~f) = NaN;
+    u(ord) = ys;
 end
 
 
@@ -1152,6 +1203,70 @@ function [T, ok] = snrcut_apply(T, cut)
          isreal(cut) && isfinite(cut);
     if ~ok, return; end
     T = T(isfinite(T.snr_db) & T.snr_db >= cut, :);
+end
+
+
+function [bases, ok, src] = ovf_load(cfg, base_out_dir)
+% Resolve and read the overflow capture list (find_overflows output).
+% Path precedence: cfg.overflow_file (stable season input, decoupled from
+% out_dir) when set and present; else <cfg.out_dir>/overflow_timestamps.txt;
+% else <base_out_dir>/overflow_timestamps.txt (shared input). ok = a file
+% was FOUND — an empty file is ok = true with zero bases ("known zero
+% overflows"), distinct from ok = false ("membership unknowable"), which
+% disables the candidates-family overflow checkbox. src = the resolved
+% path, "" when none found. Pure except for the file reads — headlessly
+% testable with temp dirs.
+    bases = strings(0, 1);
+    ok    = false;
+    src   = "";
+    p = "";
+    if isfield(cfg, 'overflow_file') && ~isempty(cfg.overflow_file) ...
+            && isfile(cfg.overflow_file)
+        p = string(cfg.overflow_file);
+    else
+        cand = fullfile(cfg.out_dir, 'overflow_timestamps.txt');
+        if isfile(cand)
+            p = string(cand);
+        elseif nargin > 1 && ~isempty(base_out_dir)
+            cand = fullfile(char(base_out_dir), 'overflow_timestamps.txt');
+            if isfile(cand), p = string(cand); end
+        end
+    end
+    if p == "", return; end
+    lines = strtrim(readlines(p));
+    bases = lines(strlength(lines) > 0);
+    ok    = true;
+    src   = p;
+end
+
+
+function m = ovf_mask(T, ovf_bases)
+% Logical column mask of candidate rows whose base_name is in the overflow
+% list. All-false (never an error) when the table is empty, lacks
+% base_name, or the list is empty — operator input must not break a
+% render. Row order preserved.
+    if isempty(T) || ~istable(T) || ...
+            ~ismember('base_name', T.Properties.VariableNames) || ...
+            isempty(ovf_bases)
+        if istable(T), n = height(T); else, n = 0; end
+        m = false(n, 1);
+        return;
+    end
+    m = ismember(string(T.base_name), string(ovf_bases));
+    m = m(:);
+end
+
+
+function ok = ovf_usable(T, ovf_ok)
+% True when the overflow display filter can act: an overflow list file was
+% found (ovf_ok, see ovf_load) AND the candidates table has a base_name
+% column of the text types ovf_mask matches on (string / cellstr). Drives
+% the checkbox Enable state and gates both exclusion and marking in the
+% render — a checked-but-unusable box must never silently filter.
+    ok = (islogical(ovf_ok) || isnumeric(ovf_ok)) && isscalar(ovf_ok) && ...
+         logical(ovf_ok) && ~isempty(T) && istable(T) && ...
+         ismember('base_name', T.Properties.VariableNames) && ...
+         (isstring(T.base_name) || iscellstr(T.base_name));
 end
 
 

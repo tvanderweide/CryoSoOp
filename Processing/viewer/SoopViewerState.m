@@ -47,6 +47,8 @@ classdef SoopViewerState < handle
         CAND
         WX
         OVF
+        OVF_ok = false      % true when an overflow list file was found (gates cb_ovf)
+        OVF_src = ""        % resolved overflow-list path ("" when none found)
         cache
         calib_base_cache
         calib_notch_cache
@@ -123,6 +125,8 @@ classdef SoopViewerState < handle
         phline_row
         sp_snrcut
         snrcut_row
+        cb_ovf
+        ovf_row
         cb_theory
         dd_thanchor
         theory_row

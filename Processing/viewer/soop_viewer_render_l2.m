@@ -1,5 +1,6 @@
-% soop_viewer_render_l2  L2 CSV plot family: satellite candidates (with optional
-% weather overlay), candidate diurnal phase, and satellite elevation / azimuth.
+% soop_viewer_render_l2  L2 CSV plot family: satellite candidates (wrapped or
+% unwrapped phase, with optional weather overlay), candidate diurnal phase, and
+% satellite elevation / azimuth.
 function soop_viewer_render_l2(V, kind)
     S = V;
     cfg = V.cfg;
@@ -111,19 +112,54 @@ function soop_viewer_render_l2(V, kind)
         if snr_ok && snr_cut ~= V.U.snrcut_start(V.cfg)
             snr_note = sprintf([' ' char(8212) ' SNR ' char(8805) ' %g dB'], snr_cut);
         end
-        % Distinguish "range/window empty" from "the SNR cutoff removed the
-        % pick(s)" in both branches below: the hint appears only when the
-        % SAME selection re-run on the unfiltered table yields rows (no
-        % numeric count — nonfinite-SNR rows drop too, not just "below").
-        cut_hint = sprintf(['Captures exist there, but none with valid SNR ' ...
-            char(8805) ' %g dB.'], snr_cut);
+        % Overflow display filter (side-panel checkbox): drop flagged rows
+        % BEFORE the date/daily selection so a day's pick swaps to the
+        % nearest clean capture (same semantics as the SNR cutoff).
+        % ovf_usable gates a checked-but-unusable box (no list found / no
+        % base_name column) so it never silently filters with an unknown
+        % list.
+        ovf_on = S.cb_ovf.Value && V.U.ovf_usable(S.CAND, S.OVF_ok);
+        ovf_note = '';
+        if ovf_on
+            CAND = CAND(~V.U.ovf_mask(CAND, S.OVF), :);
+            ovf_note = [' ' char(8212) ' overflow excluded'];
+        end
+        % Distinguish "range/window empty" from "a display filter removed
+        % the pick(s)" in both branches below: the hint appears only when
+        % the SAME selection re-run on the unfiltered table yields rows (no
+        % numeric count — nonfinite-SNR rows drop too, not just "below"),
+        % and it names only the filters that actually ran.
+        if snr_ok && ovf_on
+            cut_hint = sprintf(['Captures exist there, but none pass the SNR ' ...
+                char(8805) ' %g dB / overflow filters.'], snr_cut);
+        elseif snr_ok
+            cut_hint = sprintf(['Captures exist there, but none with valid SNR ' ...
+                char(8805) ' %g dB.'], snr_cut);
+        else
+            cut_hint = 'Captures exist there, but the overflow filter removed them.';
+        end
+        % Candidate column names (raw baseline or corr_<norad>) — pure
+        % string building from the kind.
+        is_unwrap = startsWith(kind, 'L2: Candidates Unwrapped');
+        m = regexp(kind, '\((\d+)\)', 'tokens', 'once');
+        if isempty(m)
+            c_sinc = 'phase_raw_deg';  c_fd = 'phase_raw_fd_deg';
+            c_muos = 'phase_raw_fd_muos_deg';  phase_label = 'sensor data';
+        else
+            c_sinc = ['corr_' m{1}];  c_fd = ['corr_' m{1} '_fd'];
+            c_muos = ['corr_' m{1} '_fd_muos'];
+            phase_label = regexp(kind, 'MUOS-\d+', 'match', 'once');
+            if is_unwrap
+                phase_label = [char(phase_label) ' unwrapped'];
+            end
+        end
         % Optional daily time-of-day filter: one capture per target day (the
         % capture nearest that day's target instant), dropping days whose
         % nearest capture is farther than TOD_WINDOW away. The date range
         % selects target days, so the candidate subset gets ±TOD_WINDOW
         % slack — a capture just outside the picked range may serve a
-        % target day inside it. Selection is row-based (same rows for all
-        % three candidate figures); a kept row whose phase value is NaN
+        % target day inside it. Selection is row-based (same rows for
+        % every candidate figure); a kept row whose phase value is NaN
         % still counts in n but draws no point.
         tod_note = '';
         if S.cb_tod.Value
@@ -144,7 +180,7 @@ function soop_viewer_render_l2(V, kind)
                 % Re-run the SAME selection on the unfiltered table: only a
                 % nonempty unfiltered pick proves the cutoff (not the
                 % window) removed the day(s).
-                if snr_ok
+                if snr_ok || ovf_on
                     TCw0 = in_win(S.CAND);
                     [ix0, tday0] = V.U.tod_daily_idx(tcol(TCw0), tgt, TOD_WINDOW);
                     if ~isempty(TCw0(ix0(tday0 >= t0 & tday0 < t1), :))
@@ -159,21 +195,13 @@ function soop_viewer_render_l2(V, kind)
             TC = CAND(tcol(CAND) >= t0 & tcol(CAND) < t1, :);
             if isempty(TC)
                 msg = 'No candidate rows in the selected date range.';
-                if snr_ok && ~isempty(S.CAND(tcol(S.CAND) >= t0 & tcol(S.CAND) < t1, :))
+                if (snr_ok || ovf_on) && ...
+                        ~isempty(S.CAND(tcol(S.CAND) >= t0 & tcol(S.CAND) < t1, :))
                     msg = cut_hint;
                 end
                 show_msg(msg);
                 return;
             end
-        end
-        m = regexp(kind, '\((\d+)\)', 'tokens', 'once');
-        if isempty(m)
-            c_sinc = 'phase_raw_deg';  c_fd = 'phase_raw_fd_deg';
-            c_muos = 'phase_raw_fd_muos_deg';  phase_label = 'sensor data';
-        else
-            c_sinc = ['corr_' m{1}];  c_fd = ['corr_' m{1} '_fd'];
-            c_muos = ['corr_' m{1} '_fd_muos'];
-            phase_label = regexp(kind, 'MUOS-\d+', 'match', 'once');
         end
         [phase_col, dlab] = domain_col1(TC, c_sinc, c_fd, c_muos);
         phase_label = [char(phase_label) ' [' char(dlab) ']'];
@@ -190,8 +218,38 @@ function soop_viewer_render_l2(V, kind)
             y_ph = wrap_deg(y_ph + dlt);
             phase_label = [phase_label ' + phase offset cal'];
         end
-        phase_label = [phase_label tod_note snr_note];   % '' unless filters active
+        % Unwrapped views: unwrap the DISPLAYED samples only (after the
+        % date-range / daily time-of-day / SNR-cutoff selection), with
+        % chain-cal already applied row-wise. Changing any filter
+        % re-unwraps the series and can re-anchor it or change branches;
+        % under the daily filter the unwrap runs at ~24 h spacing, so a
+        % day-to-day phase change > 180° aliases by n*360°.
+        if is_unwrap
+            y_ph = V.U.unwrap_deg(tcol(TC), y_ph);
+        end
         agg = S.dd_agg.Value;
+        % Overflow marking policy (exclusion off): red per-point marks only
+        % under Raw captures; aggregated modes note the included count in
+        % the title instead, so aggregate views never draw non-aggregate
+        % points or stretch the unwrapped auto y-limits. ovf_m is the
+        % CONTRIBUTION mask — membership AND a finite displayed value: a
+        % NaN row (e.g. an unmatched chain-cal join) draws nothing and
+        % feeds no aggregate, so it must not create a legend entry or
+        % count in the title note.
+        if ovf_on
+            ovf_m = false(height(TC), 1);
+        else
+            ovf_m = V.U.ovf_mask(TC, S.OVF) & isfinite(y_ph);
+        end
+        mark_ovf = any(ovf_m) && strcmp(agg, 'Raw captures');
+        if any(ovf_m) && ~strcmp(agg, 'Raw captures')
+            ovf_note = sprintf([' ' char(8212) ' %d overflow included'], sum(ovf_m));
+        end
+        phase_label = [phase_label tod_note snr_note ovf_note];   % '' unless filters active
+        % Unwrapped phase is a linear quantity — circular stats would
+        % re-wrap it. Aggregated std then measures the temporal spread of a
+        % trending cumulative phase, not estimator uncertainty.
+        if is_unwrap, ph_kind = 'lin'; else, ph_kind = 'phase'; end
         % Weather rows in range (depth + temperatures share this table). Each
         % overlay is gated by its checkbox AND the presence of finite data.
         if ~isempty(S.WX)
@@ -235,7 +293,7 @@ function soop_viewer_render_l2(V, kind)
         st_lines = gobjects(0);  st_pts = gobjects(0);  st_dots = gobjects(0);
         % Left axis: phase (wrapped circular, as collected)
         yyaxis(ax, 'left');
-        h_phase = plot_series(ax, tcol(TC), y_ph, agg, 'phase');
+        h_phase = plot_series(ax, tcol(TC), y_ph, agg, ph_kind);
         if S.cb_tod.Value
             % Daily-filter points read better slightly larger (works on
             % both the raw Line and the aggregated ErrorBar handle).
@@ -244,7 +302,8 @@ function soop_viewer_render_l2(V, kind)
         % phaseLine governs the connecting line in EVERY agg mode (both
         % handle types): unchecked = markers only, checked = joined. Note a
         % joined line bridges NaN samples and long capture gaps (aggregate
-        % drops nonfinite rows) and draws jump segments at ±180° wraps.
+        % drops nonfinite rows) and, on the wrapped views, draws jump
+        % segments at ±180° wraps.
         if S.cb_phline.Value
             h_phase.LineStyle = '-';
         else
@@ -260,7 +319,7 @@ function soop_viewer_render_l2(V, kind)
         % plot_series handle keeps its phaseLine line / error bars but
         % hides its own markers so the colored scatter reads.
         if hour_on
-            [ta_h, ya_h] = M.aggregate(tcol(TC), y_ph, agg, 'phase');
+            [ta_h, ya_h] = M.aggregate(tcol(TC), y_ph, agg, ph_kind);
             h_phase.Marker = 'none';
             hsc = scatter(ax, ta_h, ya_h, 36, V.U.hour_bins(ta_h) + 0.5, 'filled');
             colormap(ax, hsv(24));           % cyclic map for a cyclic hour
@@ -278,9 +337,37 @@ function soop_viewer_render_l2(V, kind)
             lh(end) = hsc;                   % legend binds the colored points
             st_dots(end+1) = hsc;            % dot area scales by (Pt x)^2
         end
-        ylabel(ax, 'Phase (deg)');
-        ylim(ax, [-180 180]);  yticks(ax, -180:90:180);
+        if is_unwrap
+            % Cumulative over the shown samples; auto limits.
+            ylabel(ax, 'Unwrapped phase (deg)');
+        else
+            ylabel(ax, 'Phase (deg)');
+            ylim(ax, [-180 180]);  yticks(ax, -180:90:180);
+        end
         leg{end+1} = 'Phase';
+        % Overflow marks (exclusion off, Raw captures only): red points at
+        % the flagged captures' displayed values — exactly what those rows
+        % contribute to the series (post chain-cal/unwrap). Marker-only
+        % handle on the still-active LEFT axis, drawn after the phase/hour
+        % handles so it overpaints them; appended after the completed
+        % Phase handle/label pair so lh and leg stay aligned; markers
+        % scale with Pt x (st_pts only — no line, no scatter dots).
+        if mark_ovf
+            if strcmp(h_phase.Marker, 'none')   % hour coloring hid the markers
+                mk = 'o';
+            else
+                mk = h_phase.Marker;
+            end
+            t_TC = tcol(TC);
+            h_ovf = plot(ax, t_TC(ovf_m), y_ph(ovf_m), ...
+                         'LineStyle', 'none', 'Marker', mk, ...
+                         'MarkerSize', h_phase.MarkerSize, ...
+                         'Color', [0.850 0.100 0.100], ...
+                         'MarkerFaceColor', [0.850 0.100 0.100]);
+            lh(end+1) = h_ovf;
+            leg{end+1} = 'Overflow';
+            st_pts(end+1) = h_ovf;
+        end
         % AboveFreezing wet-snow bands: one orange layer over the times ANY
         % ticked temperature sensor reads > 0 degC (union; a sample where
         % every ticked sensor is invalid splits the band, as do sample gaps
@@ -382,8 +469,10 @@ function soop_viewer_render_l2(V, kind)
             else
                 anch = 'swe0';
             end
+            % Unwrapped views draw the theory curve continuous across
+            % fringes (wrap_out false); wrapped views keep the ±180 wrap.
             O = V.U.theory_overlay(tcol(TC), y_ph, tcol(S.WX), S.WX.swe_mm, ...
-                                   anch, fringe);
+                                   anch, fringe, ~is_unwrap);
             if O.ok
                 mrng = O.t >= t0 & O.t < t1;
                 lh(end+1) = plot(ax, O.t(mrng), O.phi_deg(mrng), '--', ...
