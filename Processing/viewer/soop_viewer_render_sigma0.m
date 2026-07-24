@@ -441,8 +441,6 @@ function render_footprint_map(V)
     ttl = sprintf('Fresnel footprint — %s', sat_label);
     if day_pinned
         ttl = sprintf('%s — %s', ttl, string(t0, 'yyyy-MM-dd'));
-    else
-        ttl = sprintf('%s — range mean', ttl);
     end
     styles = {'-', '--'};
     colors = {[0.85 0.33 0.10], [0.30 0.75 0.93]};   % orange / cyan
