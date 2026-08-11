@@ -19,6 +19,52 @@ function t = mins(tc, m)
 end
 
 
+% ------------------------------------------------ nearest_above_freezing
+
+function test_nearest_strict_threshold_and_window(tc)
+    % The nearest finite observation controls the result (not any warm value
+    % in the window); the 35-minute edge is inclusive and 0 degC is cold.
+    U = tc.TestData.U;
+    win = minutes(SoopViewerState.ABOVE_FREEZING_NEAREST_WINDOW_MIN);
+    threshold = SoopViewerState.ABOVE_FREEZING_THRESHOLD_C;
+    tcapture = mins(tc, [60 180 300 420]);
+    twx = mins(tc, [30 50 145 335 455 + 1/60]);
+    temp = [1; -1; eps; 0; 2];
+    [warm, idx] = U.nearest_above_freezing(tcapture, twx, temp, win, threshold);
+    verifyEqual(tc, warm, [false; true; false; false]);
+    verifyEqual(tc, idx, [2; 3; 4; 0]);
+end
+
+function test_nearest_finite_and_tie_policy(tc)
+    % Invalid temperatures are ineligible. Equal-distance finite matches use
+    % the earlier timestamp even when the input weather rows are unsorted.
+    U = tc.TestData.U;
+    tcapture = mins(tc, [600 720]);
+    twx = mins(tc, [730 600 580 710]);
+    temp = [-1; NaN; 1; 2];
+    [warm, idx] = U.nearest_above_freezing(tcapture, twx, temp, minutes(35), 0);
+    verifyEqual(tc, warm, [true; true]);
+    verifyEqual(tc, idx, [3; 4]);
+end
+
+function test_nearest_empty_shape_and_validation(tc)
+    U = tc.TestData.U;
+    [warm, idx] = U.nearest_above_freezing( ...
+        reshape(mins(tc, [0 15]), 1, []), NaT(0, 1), [], minutes(35), 0);
+    verifyEqual(tc, warm, false(2, 1));
+    verifyEqual(tc, idx, zeros(2, 1));
+    verifyError(tc, @() U.nearest_above_freezing( ...
+        mins(tc, 0), mins(tc, [0 15]), 1, minutes(35), 0), ...
+        'soop_viewer_util:nearest_above_freezing:length');
+    verifyError(tc, @() U.nearest_above_freezing( ...
+        mins(tc, 0), mins(tc, 0), 1, minutes(-1), 0), ...
+        'soop_viewer_util:nearest_above_freezing:window');
+    verifyError(tc, @() U.nearest_above_freezing( ...
+        mins(tc, 0), mins(tc, 0), 1, minutes(35), NaN), ...
+        'soop_viewer_util:nearest_above_freezing:threshold');
+end
+
+
 % --------------------------------------------------------------- freeze_spans
 
 function test_runs_and_padding(tc)
@@ -138,6 +184,24 @@ function test_xregion_yyaxis_layer_and_legend(tc)
     he = errorbar(ax, t0 + days(0:5), 1:6, 0.1 * ones(1, 6), 'o-', 'MarkerSize', 4);
     lgd = legend([hl, he, hr(1)], {'phase', 'depth', 'wet snow'});
     verifyNumElements(tc, lgd.String, 3);
+end
+
+function test_xline_width_and_style_scaling(tc)
+    % Nearest-mode rules remain visibly wider than ordinary plot lines and
+    % participate in the candidates-family Line x scaling contract.
+    fig = figure('Visible', 'off');
+    cleanup = onCleanup(@() close(fig));
+    ax = axes(fig);
+    yyaxis(ax, 'left');
+    t = tc.TestData.t0 + days([1 3]);
+    hv = xline(ax, t, '-', 'Color', [1.0 0.55 0.10], ...
+               'LineWidth', SoopViewerState.ABOVE_FREEZING_NEAREST_LINE_WIDTH);
+    w = SoopViewerState.ABOVE_FREEZING_NEAREST_LINE_WIDTH;
+    verifyNumElements(tc, hv, 2);
+    verifyEqual(tc, [hv.LineWidth], [w w]);
+    U = tc.TestData.U;
+    U.style_apply(U.style_factors(2, 1), hv, gobjects(0), gobjects(0));
+    verifyEqual(tc, [hv.LineWidth], [2*w 2*w]);
 end
 
 function test_markersize_mutation(tc)

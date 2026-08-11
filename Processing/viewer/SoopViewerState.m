@@ -7,6 +7,16 @@ classdef SoopViewerState < handle
         % represent product directories.
         COMPARE_DATASET  = '__compare_base_notch__';
         CHAINCAL_DATASET = '__notch_chaincal__';
+
+        % Daily AboveFreezing-nearest matching and display constants.
+        % LINE_WIDTH is in points, sized so consecutive warm days abut with
+        % no gap: a full season across the default 1500 px window leaves
+        % roughly 4-5 points per day. Rules share one color, so the slight
+        % overlap at narrower spans is invisible; widen this if a hairline
+        % shows on a wider window.
+        ABOVE_FREEZING_THRESHOLD_C = 0;
+        ABOVE_FREEZING_NEAREST_WINDOW_MIN = 35;
+        ABOVE_FREEZING_NEAREST_LINE_WIDTH = 5;
     end
 
     properties
@@ -121,6 +131,8 @@ classdef SoopViewerState < handle
         cb_tod
         ef_tod
         tod_row
+        cb_abvfrz_nearest
+        abvfrz_nearest_row
         cb_phline
         phline_row
         sp_snrcut

@@ -2,7 +2,8 @@ function U = soop_viewer_util()
 % UI/label/formatting helpers for BrundageSoOp_viewer. Returns a struct of
 % handles (same idiom as rfi_excise/BrundageSoOp_fun); each takes V first
 % (except pure helpers style_legend/wrap_deg/domain_color/plot_uses_*/tcol/
-% parse_tod/tod_daily_idx/phoff_measure/phoff_prep/phoff_title/freeze_spans/
+% parse_tod/tod_daily_idx/nearest_above_freezing/phoff_measure/phoff_prep/
+% phoff_title/freeze_spans/
 % wx_axis_cfg/wx_axes_plan/snrcut_usable/snrcut_apply/snrcut_start/wx_temp_labels/
 % swe_per_fringe_mm/fringe_pick/fringe_latch/theory_overlay/unwrap_deg/
 % is_cand_kind/hour_bins/style_factors/style_apply/src_desc/open_fun).
@@ -33,6 +34,7 @@ function U = soop_viewer_util()
     U.tcol = @tcol;
     U.parse_tod = @parse_tod;
     U.tod_daily_idx = @tod_daily_idx;
+    U.nearest_above_freezing = @nearest_above_freezing;
     U.phoff_measure = @phoff_measure;
     U.phoff_prep = @phoff_prep;
     U.phoff_title = @phoff_title;
@@ -806,6 +808,51 @@ function [idx, tday] = tod_daily_idx(t, target, win)
     [idx, ord] = sort(srt.orig(sel));
     tday  = srt.d_near(sel);
     tday  = tday(ord);
+end
+
+
+function [warm, wx_idx] = nearest_above_freezing(t_capture, t_wx, temp_c, win, threshold_c)
+% Match each collection to its nearest finite air-temperature observation.
+% A match is usable when its absolute time offset is <= win; warm is true
+% only when that nearest observation is strictly > threshold_c. Equal-time
+% distances choose the earlier weather timestamp, then the earlier input row.
+% Outputs are columns aligned with t_capture; unmatched wx_idx values are 0.
+    t_capture = t_capture(:);
+    t_wx = t_wx(:);
+    temp_c = temp_c(:);
+    if numel(t_wx) ~= numel(temp_c)
+        error('soop_viewer_util:nearest_above_freezing:length', ...
+              'nearest_above_freezing: t_wx and temp_c must have equal length.');
+    end
+    if ~isduration(win) || ~isscalar(win) || ...
+            ~isfinite(seconds(win)) || win < seconds(0)
+        error('soop_viewer_util:nearest_above_freezing:window', ...
+              'nearest_above_freezing: win must be a finite nonnegative duration.');
+    end
+    if ~isnumeric(threshold_c) || ~isscalar(threshold_c) || ~isfinite(threshold_c)
+        error('soop_viewer_util:nearest_above_freezing:threshold', ...
+              'nearest_above_freezing: threshold_c must be a finite numeric scalar.');
+    end
+    if xor(isempty(t_capture.TimeZone), isempty(t_wx.TimeZone))
+        error('soop_viewer_util:nearest_above_freezing:timezone', ...
+              'Collection and weather datetimes must both be zoned or both unzoned.');
+    end
+
+    warm = false(numel(t_capture), 1);
+    wx_idx = zeros(numel(t_capture), 1);
+    orig = (1:numel(t_wx))';
+    valid = ~isnat(t_wx) & isfinite(temp_c);
+    W = table(t_wx(valid), temp_c(valid), orig(valid), ...
+              'VariableNames', {'t', 'temp_c', 'orig'});
+    W = sortrows(W, {'t', 'orig'});
+    for k = 1:numel(t_capture)
+        if isnat(t_capture(k)) || isempty(W), continue; end
+        [dist, j] = min(abs(W.t - t_capture(k)));
+        if dist <= win
+            wx_idx(k) = W.orig(j);
+            warm(k) = W.temp_c(j) > threshold_c;
+        end
+    end
 end
 
 

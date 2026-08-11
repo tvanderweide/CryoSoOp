@@ -258,13 +258,18 @@ function soop_viewer_render_l2(V, kind)
             TW = table();
         end
         has_col = @(c) ~isempty(TW) && ismember(c, TW.Properties.VariableNames);
+        has_wx_col = @(c) ~isempty(S.WX) && ismember(c, S.WX.Properties.VariableNames);
         show_dep = S.cb_depth.Value && has_col('depth_m')  && any(isfinite(TW.depth_m));
         show_swe = S.cb_swe.Value   && has_col('swe_mm')  && any(isfinite(TW.swe_mm));
         show_air = S.cb_airtc.Value && has_col('airtc_c') && any(isfinite(TW.airtc_c));
         show_tmp = S.cb_tempc.Value && has_col('temp_c')  && any(isfinite(TW.temp_c));
         % AboveFreezing swaps the ticked temperature LINES for one orange
-        % above-freezing band layer — no temperature ruler axes then.
+        % indicator layer — no temperature ruler axes then.
         abvfrz = S.cb_abvfrz.Value;
+        abvfrz_nearest = abvfrz && S.cb_tod.Value && ...
+            S.cb_abvfrz_nearest.Value && startsWith(kind, 'L2: Candidates');
+        nearest_air_ok = S.cb_airtc.Value && has_wx_col('airtc_c') && ...
+            any(isfinite(S.WX.airtc_c));
         want_temp = (show_air || show_tmp) && t1 > t0 && ~abvfrz;
         % Depth and temperature always plot at raw 15-min resolution; the agg
         % dropdown only applies to the phase line.
@@ -368,13 +373,34 @@ function soop_viewer_render_l2(V, kind)
             leg{end+1} = 'Overflow';
             st_pts(end+1) = h_ovf;
         end
-        % AboveFreezing wet-snow bands: one orange layer over the times ANY
-        % ticked temperature sensor reads > 0 degC (union; a sample where
-        % every ticked sensor is invalid splits the band, as do sample gaps
-        % > 1.5x the station cadence — see freeze_spans). xregion spans the
-        % full height of the yyaxis pair, ships since R2023a, and Layer
-        % 'bottom' keeps the bands behind the data.
-        if abvfrz && (show_air || show_tmp)
+        % AboveFreezing wet-snow indicator. Nearest mode uses the closest
+        % finite AirTC observation and thick collection-time rules. Normal
+        % mode remains one band layer over times ANY ticked sensor is warm;
+        % invalid samples and long station gaps split bands (freeze_spans).
+        if abvfrz_nearest
+            if nearest_air_ok
+                % Match the full weather table so a kept capture just outside
+                % a target-day range can still use its nearby observation.
+                match_window = minutes(S.ABOVE_FREEZING_NEAREST_WINDOW_MIN);
+                [warm, ~] = V.U.nearest_above_freezing( ...
+                    tcol(TC), tcol(S.WX), S.WX.airtc_c, match_window, ...
+                    S.ABOVE_FREEZING_THRESHOLD_C);
+                if any(warm)
+                    t_TC = tcol(TC);
+                    % Layer 'bottom' (xline defaults to 'top') keeps the
+                    % rules behind the markers they annotate — a kept
+                    % capture plots at exactly the rule's x position.
+                    hv = xline(ax, t_TC(warm), '-', ...
+                               'Color', [1.0 0.55 0.10], ...
+                               'LineWidth', S.ABOVE_FREEZING_NEAREST_LINE_WIDTH, ...
+                               'Layer', 'bottom');
+                    st_lines = [st_lines, reshape(hv, 1, [])];
+                    lh(end+1) = hv(1);
+                    leg{end+1} = sprintf('Air Temp > %g%cC (nearest)', ...
+                        S.ABOVE_FREEZING_THRESHOLD_C, char(176));
+                end
+            end
+        elseif abvfrz && (show_air || show_tmp)
             cols = [];
             if show_air, cols = [cols, TW.airtc_c]; end
             if show_tmp, cols = [cols, TW.temp_c];  end

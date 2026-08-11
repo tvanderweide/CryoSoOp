@@ -179,6 +179,16 @@ function test_catalog_wrapped_unwrapped_language(tc)
     verifyTrue(tc, contains(eu, 'CONTINUOUS'));
     verifyTrue(tc, contains(eu, 'no wrap jumps'));
     verifyFalse(tc, contains(eu, 'circular aggregation'));
+    for txt = {ew, eu}
+        verifyTrue(tc, contains(txt{1}, 'AboveFreezing - Nearest'));
+        verifyTrue(tc, contains(txt{1}, [char(177) '35 min']));
+    end
+    for name = {'L2: Candidates — MUOS-5 (41622)', ...
+                'L2: Candidates Unwrapped — MUOS-5 (41622)'}
+        math = PI(strcmp(names, name{1})).math;
+        verifyTrue(tc, contains(math, 'argmin(|t_wx-t_capture|)'));
+        verifyTrue(tc, contains(math, '<=35 min'));
+    end
 end
 
 
@@ -364,6 +374,42 @@ function test_render_tod_daily_unwrap(tc)
     % never matches the full-season branch at those samples.
     verifyLessThan(tc, max(h.YData), 180);
     verifyGreaterThan(tc, max(abs(h.YData(:) - truth(loc))), 180);
+end
+
+function test_render_above_freezing_nearest_wrapped_and_unwrapped(tc)
+    % Both Candidates flavors draw the same thick rule only at daily picks
+    % whose nearest finite AirTC observation is warm and within 35 minutes.
+    V = seeded_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    t = tc.TestData.t0 + days((0:2)') + hours(6);
+    V.CAND = table(t, "cap_" + string((1:3)'), 20 * ones(3, 1), [10; 20; 30], ...
+        'VariableNames', {'timestamp', 'base_name', 'snr_db', 'corr_41622'});
+    twx = [t(1) + minutes(20); t(2) - minutes(20); t(3) + minutes(36)];
+    V.WX = table(twx, [1; -1; 2], 'VariableNames', {'timestamp', 'airtc_c'});
+    V.dp1.Value = tc.TestData.t0;
+    V.dp2.Value = tc.TestData.t0 + days(2);
+    V.cb_tod.Value = true;
+    V.ef_tod.Value = '0600';
+    V.cb_airtc.Value = true;
+    V.cb_abvfrz.Value = true;
+    V.cb_abvfrz_nearest.Value = true;
+    kinds = {'L2: Candidates — MUOS-5 (41622)', ...
+             'L2: Candidates Unwrapped — MUOS-5 (41622)'};
+    for k = 1:numel(kinds)
+        soop_viewer_render_l2(V, kinds{k});
+        hv = findobj(V.panel, 'Type', 'constantline');
+        verifyNumElements(tc, hv, 1, kinds{k});
+        verifyEqual(tc, hv.Value, t(1), kinds{k});
+        verifyEqual(tc, hv.LineWidth, ...
+                    SoopViewerState.ABOVE_FREEZING_NEAREST_LINE_WIDTH, kinds{k});
+        % Behind the data, like the continuous bands: the annotated capture
+        % plots at exactly this x position.
+        verifyEqual(tc, hv.Layer, 'bottom', kinds{k});
+        lgd = findobj(V.panel, 'Type', 'legend');
+        verifyNumElements(tc, lgd, 1, kinds{k});
+        verifyTrue(tc, any(contains(lgd.String, '(nearest)')), kinds{k});
+        delete(allchild(V.panel));
+    end
 end
 
 function test_render_chaincal_unwrap(tc)

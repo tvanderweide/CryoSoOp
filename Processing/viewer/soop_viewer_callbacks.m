@@ -21,17 +21,23 @@ function C = soop_viewer_callbacks()
 end
 
 
-function set_family_rows(V, is_cand)
+function set_family_rows(V, is_cand, is_candidate_plot)
 % Show/hide the satellite-candidates-family controls: the row-1 weather
 % checkboxes and the side-panel daily/phaseLine/SNR/overflow/theory/
-% fringe/hour/style rows. Pure visibility — Enable states and the domain snap stay in
-% render_now. Callable headlessly (layout tests exercise the real gating).
+% fringe/hour/style rows. Also couples AboveFreezing - Nearest to the four
+% MUOS candidate plots and the daily control's current value. The remaining
+% Enable states and the domain snap stay in render_now. Callable headlessly.
     S = V;
+    if nargin < 3, is_candidate_plot = is_cand; end
     on = matlab.lang.OnOffSwitchState(is_cand);
     set([S.cb_depth, S.cb_swe, S.cb_airtc, S.cb_tempc, S.cb_abvfrz], ...
         'Visible', on);
     set([S.tod_row, S.phline_row, S.snrcut_row, S.ovf_row, S.theory_row, ...
          S.fringe_row, S.hour_row, S.style_row], 'Visible', on);
+    S.abvfrz_nearest_row.Visible = ...
+        matlab.lang.OnOffSwitchState(is_candidate_plot);
+    S.cb_abvfrz_nearest.Enable = ...
+        matlab.lang.OnOffSwitchState(is_candidate_plot && S.cb_tod.Value);
 end
 
 
@@ -404,7 +410,8 @@ function render_now(V)
     % and unwrapped, + Sensor data); the visibility set lives in
     % set_family_rows (shared with tests).
     is_cand = V.U.is_cand_kind(kind);
-    set_family_rows(V, is_cand);
+    is_candidate_plot = startsWith(kind, 'L2: Candidates');
+    set_family_rows(V, is_cand, is_candidate_plot);
     if is_cand
         % These overlay panels draw ONE phase column, so the multi-domain
         % 'Compare all' selection is meaningless here — snap the dropdown to

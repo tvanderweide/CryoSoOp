@@ -142,12 +142,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [30 1]);
-    % Rows 20/21 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [31 1]);
+    % Rows 22/23 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    % The 28 px control rows are children 1-19 (the run of 28s below), so a
+    % The 28 px control rows are children 1-21 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -323,6 +323,23 @@ function soop_viewer_layout(V)
         'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.tod_row = tod_row;
     S.tod_row.Visible = 'off';
+
+    % AboveFreezing - Nearest modifies the wet-snow overlay on the four MUOS
+    % Candidates views. With the daily filter on, thick orange collection-time
+    % rules replace the continuous bands for captures whose nearest finite
+    % air-temperature observation is warm within the configured match window.
+    abvfrz_nearest_row = uigridlayout(info_gl, [1 1]);
+    abvfrz_nearest_row.Padding = [0 0 0 0];
+    S.cb_abvfrz_nearest = uicheckbox(abvfrz_nearest_row, ...
+        'Text', 'AboveFreezing - Nearest', 'Value', false, 'Enable', 'off', ...
+        'Tooltip', sprintf(['With Daily capture nearest, AirTC, and AboveFreezing ' ...
+            'enabled, draw a thick rule at a kept collection only when its ' ...
+            'nearest finite air temperature within %c%d min is > %g %cC.'], ...
+            char(177), S.ABOVE_FREEZING_NEAREST_WINDOW_MIN, ...
+            S.ABOVE_FREEZING_THRESHOLD_C, char(176)), ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.abvfrz_nearest_row = abvfrz_nearest_row;
+    S.abvfrz_nearest_row.Visible = 'off';
 
     % phaseLine — shown only on the candidates-family views. Governs the
     % phase series' connecting line in EVERY aggregation mode: unchecked =

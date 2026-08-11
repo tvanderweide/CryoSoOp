@@ -256,6 +256,12 @@ split into 12 files under `viewer/` (shared state object, callbacks,
 catalog, data loading, layout, five per-plot-family renderers, and UI
 utility helpers).
 
+On the wrapped and unwrapped `L2: Candidates` plots, `AboveFreezing` can be
+combined with the side-panel `AboveFreezing - Nearest` option after enabling
+`Daily capture nearest`. With the AirTC series selected, this mode draws thick
+orange rules only at kept collection times whose nearest finite air-temperature
+observation is strictly above 0 °C and no more than 35 minutes away.
+
 ## Testing
 
 MATLAB unit tests for the RFI excision path live in `tests/`
