@@ -206,7 +206,7 @@ function render_l1(V, kind)
             end
             hold(ax, 'off');
             if numel(cols) > 1, legend(hh, labs, 'Location', 'best'); end
-            ylabel(ax, 'Circular std of run''s captures (deg)');
+            ylabel(ax, 'Phase offset (deg)');
             title(ax, ['Within-run phase scatter (15 captures / 2-hourly run)' domain_suffix()]);
         case 'L1: Peak-bin vs elevation (QA)'
             if isempty(S.L2)
