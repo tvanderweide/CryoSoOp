@@ -17,6 +17,10 @@
 #   bbb_set_state.sh NL|L|Signal        named cal state
 #   bbb_set_state.sh V49 V115 V27       explicit 0/1 per pin, in GPIO_PINS order (bench/debug)
 #
+# The pins are normalised on every call (export, clear an armed edge, direction=out) but each
+# attribute is written only when it does not already hold the needed value, so calling a state
+# the switch is already in changes nothing on the hardware.
+#
 # Exit: 0 only if every GPIO write succeeded AND a read-back of the pin values matches the
 # commanded state (set -e on the remote side) -- rc=0 means VERIFIED switch state, not just
 # "ssh exited". Any nonzero rc makes cryosoop's on_cmd_fail: abort stop the run. BatchMode +
@@ -53,16 +57,35 @@ case "${1:-}" in
 esac
 
 # Remote body (single-quoted: $pins/$vals/$g/$got/$exp expand on the BBB, not here).
-# set -e => fail on the FIRST bad export/direction/value write; the trailing read-back
-# compares the concatenated pin values against the commanded state.
+# Every attribute is read first and written ONLY when it differs from what this state needs:
+# pins that already hold the commanded configuration are left untouched, so a repeat call
+# drives no transition on the RF switch. Writing direction=out re-initialises the output low,
+# so an unconditional direction write would pulse an already-high pin low on every call.
+# Order matters: edge must be cleared before direction, because a pin left armed as an
+# interrupt source (sysfs `edge` != none) is held as an input and rejects a direction write.
+# The `edge` attribute exists only for IRQ-capable GPIOs, hence the -e guard.
+# set -e => fail on the FIRST bad export/edge/direction/value write; the trailing read-back
+# compares the concatenated pin values against the commanded state. That read-back is
+# logical, not physical: it holds as a switch-state check only while active_low=0 on every
+# pin, which the *_VALS tables above assume (they are raw active-high levels).
 REMOTE_BODY='
 set -e
 for g in $pins; do
   [ -d /sys/class/gpio/gpio$g ] || echo "$g" > /sys/class/gpio/export
-  echo out > /sys/class/gpio/gpio$g/direction
+  if [ -e /sys/class/gpio/gpio$g/edge ] && [ "$(cat /sys/class/gpio/gpio$g/edge)" != none ]; then
+    echo none > /sys/class/gpio/gpio$g/edge
+  fi
+  if [ "$(cat /sys/class/gpio/gpio$g/direction)" != out ]; then
+    echo out > /sys/class/gpio/gpio$g/direction
+  fi
 done
 set -- $vals
-for g in $pins; do echo "$1" > /sys/class/gpio/gpio$g/value; shift; done
+for g in $pins; do
+  if [ "$(cat /sys/class/gpio/gpio$g/value)" != "$1" ]; then
+    echo "$1" > /sys/class/gpio/gpio$g/value
+  fi
+  shift
+done
 got=""; exp=""
 set -- $vals
 for g in $pins; do got="$got$(cat /sys/class/gpio/gpio$g/value)"; exp="$exp$1"; shift; done
