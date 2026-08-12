@@ -1013,30 +1013,39 @@ function test_style_layout_and_gating(tc)
 
     verifyEqual(tc, V.sp_linew.Value, 1);
     verifyEqual(tc, V.sp_ptsz.Value, 1);
+    verifyEqual(tc, V.sp_abvfrz_nearest_linew.Value, ...
+                SoopViewerState.ABOVE_FREEZING_NEAREST_LINE_WIDTH);
     verifyEqual(tc, V.sp_linew.Limits, [0.25 5]);
     verifyEqual(tc, V.sp_ptsz.Limits, [0.25 5]);
+    verifyEqual(tc, V.sp_abvfrz_nearest_linew.Limits, [1 20]);
     verifyEqual(tc, V.sp_linew.Step, 0.25);
     verifyEqual(tc, V.sp_ptsz.Step, 0.25);
+    verifyEqual(tc, V.sp_abvfrz_nearest_linew.Step, 0.5);
 
-    % Placement: directly under the legend row; grid has 21 x 28 px control
+    % Placement: directly under the legend row; grid has 23 x 28 px control
     % rows before the two 56 px sub-grid rows.
     g = V.style_row.Parent;
     verifyEqual(tc, V.style_row.Layout.Row, ...
                 V.dd_legend.Parent.Layout.Row + 1);
-    verifyNumElements(tc, g.RowHeight, 31);
-    verifyEqual(tc, [g.RowHeight{1:21}], repmat(28, 1, 21));
-    verifyEqual(tc, [g.RowHeight{22:23}], [56 56]);
+    verifyNumElements(tc, g.RowHeight, 33);
+    verifyEqual(tc, [g.RowHeight{1:23}], repmat(28, 1, 23));
+    verifyEqual(tc, [g.RowHeight{24:25}], [56 56]);
 
     % The new modifier is directly under Daily capture nearest. It appears
     % only for the four MUOS Candidates plots and is selectable only while
     % the daily filter is enabled; disabling it preserves the checked value.
     verifyEqual(tc, V.abvfrz_nearest_row.Layout.Row, V.tod_row.Layout.Row + 1);
+    verifyEqual(tc, V.abvfrz_nearest_width_row.Layout.Row, ...
+                V.abvfrz_nearest_row.Layout.Row + 1);
     verifyFalse(tc, logical(V.abvfrz_nearest_row.Visible));
+    verifyFalse(tc, logical(V.abvfrz_nearest_width_row.Visible));
     verifyFalse(tc, logical(V.cb_abvfrz_nearest.Enable));
     V.CB.set_family_rows(V, true, false);       % L2: Sensor data
     verifyFalse(tc, logical(V.abvfrz_nearest_row.Visible));
+    verifyFalse(tc, logical(V.abvfrz_nearest_width_row.Visible));
     V.CB.set_family_rows(V, true, true);        % wrapped/unwrapped Candidates
     verifyTrue(tc, logical(V.abvfrz_nearest_row.Visible));
+    verifyTrue(tc, logical(V.abvfrz_nearest_width_row.Visible));
     verifyFalse(tc, logical(V.cb_abvfrz_nearest.Enable));
     V.cb_tod.Value = true;
     V.CB.set_family_rows(V, true, true);

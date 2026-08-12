@@ -48,6 +48,11 @@ function U = soop_viewer_util()
     U.ovf_mask = @ovf_mask;
     U.ovf_usable = @ovf_usable;
     U.wx_temp_labels = @wx_temp_labels;
+    U.dtc_thermograph = @dtc_thermograph;
+    U.dtc_renderable = @dtc_renderable;
+    U.nearest_wx_idx = @nearest_wx_idx;
+    U.band_halfwidth = @band_halfwidth;
+    U.snowtemp_nearest_bands = @snowtemp_nearest_bands;
     U.swe_per_fringe_mm = @swe_per_fringe_mm;
     U.fringe_pick = @fringe_pick;
     U.fringe_latch = @fringe_latch;
@@ -1329,6 +1334,285 @@ function v = snrcut_start(cfg)
             v = double(t);
         end
     end
+end
+
+
+function G = dtc_thermograph(t, depth_m, dtc_c, cfg)
+% Shape DTC observations into a time-height temperature field. Sensor rows are
+% top-to-bottom by default; heights are centimeters above ground, so the
+% sensors buried in the soil carry NEGATIVE heights and the cable is treated
+% as hanging straight down. The field spans the bottom sensor up to the SNOdar
+% snow surface and is NaN above that surface or across missing DTC records.
+    G = struct('ok', false, 'why', '', 't', [], 'height_cm', [], ...
+               'temp_c', [], 'sensor_h', [], 'ground_row', []);
+    if ~isdatetime(t) || ~isnumeric(depth_m) || ~isnumeric(dtc_c) || ...
+            numel(t) ~= numel(depth_m) || size(dtc_c, 1) ~= numel(t)
+        G.why = 'DTC and snow-depth records have incompatible shapes.';
+        return;
+    end
+    if isempty(t) || isempty(dtc_c) || ~any(isfinite(dtc_c(:)))
+        G.why = 'No finite DTC snow-temperature observations in this date range.';
+        return;
+    end
+    % Sensor count comes from the data, not a constant — cable lengths differ
+    % between sites while the sensor spacing does not.
+    Q = dtc_geometry(cfg, size(dtc_c, 2));
+    if ~Q.ok
+        G.why = Q.why;
+        return;
+    end
+    sensor_h = Q.sensor_h;
+    depth_cm = 100 * double(depth_m(:));
+    max_depth = max(depth_cm(isfinite(depth_cm) & depth_cm >= 0));
+    if isempty(max_depth) || max_depth <= 0
+        G.why = 'No finite positive snow depth in this date range.';
+        return;
+    end
+    % Grid spans the buried sensors through the deepest snow surface in range,
+    % at 1 cm steps, with both end heights represented exactly. A snow surface
+    % at or below the lowest sensor collapses the grid to one height, which has
+    % no drawable vertical extent — fail closed rather than hand the renderer a
+    % degenerate single-row field.
+    h_lo = min(sensor_h);
+    if ~dtc_has_extent(max_depth, sensor_h)
+        G.why = 'Snow surface is at or below the lowest DTC sensor — no vertical extent to draw.';
+        return;
+    end
+    height_cm = unique([h_lo, ceil(h_lo):floor(max_depth), max_depth])';
+    temp_c = nan(numel(height_cm), numel(t));
+    for k = 1:numel(t)
+        v = double(dtc_c(k, :));
+        nodes = dtc_nodes(v, sensor_h, depth_cm(k));
+        if sum(nodes) < 2
+            continue;   % unrenderable record stays a blank column
+        end
+        [h, ix] = sort(sensor_h(nodes));
+        vg = v(nodes);
+        z = interp1(h, vg(ix), height_cm, 'linear', NaN);
+        z(height_cm > depth_cm(k)) = NaN;   % air above the snow stays blank
+        temp_c(:, k) = z;
+    end
+    if ~any(isfinite(temp_c(:)))
+        G.why = 'DTC sensors do not overlap the measured snowpack in this date range.';
+        return;
+    end
+    G.ok = true;
+    G.t = t(:)';
+    G.height_cm = height_cm;
+    G.temp_c = temp_c;
+    G.sensor_h = sensor_h;
+    G.ground_row = any(sensor_h < 0);   % true when soil sensors are present
+end
+
+
+function v = dtc_cfg(cfg, field, fallback)
+% Read a finite scalar DTC geometry parameter with a documented fallback.
+    v = fallback;
+    if isfield(cfg, field) && isnumeric(cfg.(field)) && ...
+            isscalar(cfg.(field)) && isfinite(cfg.(field))
+        v = double(cfg.(field));
+    end
+end
+
+
+function Q = dtc_geometry(cfg, n_sensor)
+% Resolve DTC sensor heights in cm above ground for a cable of n_sensor
+% sensors. Spacing is constant between sites; cable length is not, so the
+% count is supplied by the caller from the data. A negative bottom height
+% means the lowest sensors are buried in the soil.
+    Q = struct('ok', false, 'why', '', 'sensor_h', [], ...
+               'spacing_cm', NaN, 'bottom_cm', NaN);
+    spacing_cm = dtc_cfg(cfg, 'wx_dtc_sensor_spacing_cm', 10.16);
+    bottom_cm  = dtc_cfg(cfg, 'wx_dtc_bottom_height_cm', 0);
+    order = 'top_to_bottom';
+    if isfield(cfg, 'wx_dtc_order') && ~isempty(cfg.wx_dtc_order)
+        order = lower(char(cfg.wx_dtc_order));
+    end
+    if ~(isfinite(spacing_cm) && spacing_cm > 0 && isfinite(bottom_cm))
+        Q.why = 'DTC geometry configuration is invalid.';
+        return;
+    end
+    if ~(isscalar(n_sensor) && isfinite(n_sensor) && n_sensor >= 1)
+        Q.why = 'DTC sensor count is invalid.';
+        return;
+    end
+    switch order
+        case 'top_to_bottom'
+            Q.sensor_h = bottom_cm + (n_sensor-1:-1:0) * spacing_cm;
+        case 'bottom_to_top'
+            Q.sensor_h = bottom_cm + (0:n_sensor-1) * spacing_cm;
+        otherwise
+            Q.why = 'DTC sensor ordering must be top_to_bottom or bottom_to_top.';
+            return;
+    end
+    Q.ok = true;
+    Q.spacing_cm = spacing_cm;
+    Q.bottom_cm  = bottom_cm;
+end
+
+
+function nodes = dtc_nodes(v, sensor_h, depth_cm)
+% Interpolation nodes for one DTC record: every finite sensor at or below the
+% snow surface, PLUS the lowest finite sensor above it. That bracketing node is
+% what lets the field reach the surface instead of stopping at the topmost
+% buried sensor and leaving an uncolored band. THE ONE place this rule lives —
+% dtc_thermograph and dtc_renderable both call it so they cannot disagree about
+% which records are renderable.
+    nodes = false(1, numel(sensor_h));
+    if numel(v) ~= numel(sensor_h)
+        return;
+    end
+    good = isfinite(v(:)');
+    if ~isfinite(depth_cm) || ~any(good)
+        return;
+    end
+    nodes = good & (sensor_h <= depth_cm);
+    above = find(good & (sensor_h > depth_cm));
+    if ~isempty(above)
+        [~, ia] = min(sensor_h(above));
+        nodes(above(ia)) = true;
+    end
+end
+
+
+function ok = dtc_renderable(depth_m, dtc_c, cfg)
+% Per-record mask of DTC observations that dtc_thermograph can actually draw:
+% finite positive snow depth and at least two interpolation nodes. Used to pick
+% nearest-mode matches so a blank profile cannot win over a farther drawable
+% one. Returns a logical column aligned with the rows of dtc_c.
+    n_rec = size(dtc_c, 1);
+    ok = false(n_rec, 1);
+    if n_rec == 0 || isempty(dtc_c) || numel(depth_m) ~= n_rec
+        return;
+    end
+    Q = dtc_geometry(cfg, size(dtc_c, 2));
+    if ~Q.ok
+        return;
+    end
+    % Positive depth, a drawable vertical extent, AND two nodes: shaping a
+    % single record needs all three, so this predicts exactly what
+    % dtc_thermograph returns for that row on its own.
+    depth_cm = 100 * double(depth_m(:));
+    for k = 1:n_rec
+        ok(k) = depth_cm(k) > 0 && ...
+            dtc_has_extent(depth_cm(k), Q.sensor_h) && ...
+            sum(dtc_nodes(double(dtc_c(k, :)), Q.sensor_h, depth_cm(k))) >= 2;
+    end
+end
+
+
+function tf = dtc_has_extent(depth_cm, sensor_h)
+% True when a snow surface at depth_cm leaves a drawable vertical span above
+% the lowest sensor. Shared by dtc_thermograph and dtc_renderable so a profile
+% can never be declared renderable and then collapse to a single height row.
+    tf = isfinite(depth_cm) && depth_cm > min(sensor_h);
+end
+
+
+function wx_idx = nearest_wx_idx(t_capture, t_wx, valid, win)
+% Match each collection to its nearest USABLE weather observation. A match
+% counts when its absolute time offset is <= win; `valid` lets the caller
+% define usable (e.g. renderable DTC profiles) instead of hardcoding a rule
+% here. Equal-time distances choose the earlier weather timestamp, then the
+% earlier row. Output is a column aligned with t_capture; unmatched values
+% are 0.
+    if ~isdatetime(t_capture) || ~isdatetime(t_wx)
+        error('soop_viewer_util:nearest_wx_idx:type', ...
+              'nearest_wx_idx: t_capture and t_wx must be datetimes.');
+    end
+    t_capture = t_capture(:);
+    t_wx = t_wx(:);
+    if ~islogical(valid) || numel(valid) ~= numel(t_wx)
+        error('soop_viewer_util:nearest_wx_idx:valid', ...
+              'nearest_wx_idx: valid must be logical with one element per t_wx.');
+    end
+    valid = valid(:);
+    if ~isduration(win) || ~isscalar(win) || ...
+            ~isfinite(seconds(win)) || win < seconds(0)
+        error('soop_viewer_util:nearest_wx_idx:window', ...
+              'nearest_wx_idx: win must be a finite nonnegative duration.');
+    end
+    if xor(isempty(t_capture.TimeZone), isempty(t_wx.TimeZone))
+        error('soop_viewer_util:nearest_wx_idx:timezone', ...
+              'Collection and weather datetimes must both be zoned or both unzoned.');
+    end
+
+    wx_idx = zeros(numel(t_capture), 1);
+    orig = (1:numel(t_wx))';
+    keep = ~isnat(t_wx) & valid;
+    W = table(t_wx(keep), orig(keep), 'VariableNames', {'t', 'orig'});
+    W = sortrows(W, {'t', 'orig'});
+    for k = 1:numel(t_capture)
+        if isnat(t_capture(k)) || isempty(W), continue; end
+        [dist, j] = min(abs(W.t - t_capture(k)));
+        if dist <= win
+            wx_idx(k) = W.orig(j);
+        end
+    end
+end
+
+
+function B = snowtemp_nearest_bands(t_cap, wx_idx, WX, cfg)
+% Shape one DTC profile per kept capture for SnowTemp - Nearest mode.
+% Each matched weather row is shaped on its own through dtc_thermograph, so
+% surface bracketing and above-snow masking are identical to the continuous
+% field. Bands are keyed to the CAPTURE time (not the observation time) so they
+% line up with the phase markers above, and are emitted in capture-time order.
+% No deduplication: two captures may legitimately share one nearest profile.
+    B = struct('on', false, 't_cap', datetime.empty(0, 1), 'cols', {{}}, ...
+               'height_cm', [], 'h_lo', NaN, 'h_hi', NaN, 'ground_row', false);
+    t_cap = t_cap(:);
+    wx_idx = wx_idx(:);
+    if isempty(t_cap) || numel(wx_idx) ~= numel(t_cap)
+        return;
+    end
+    [t_sorted, order] = sort(t_cap);
+    wx_sorted = wx_idx(order);
+    cols = {};
+    h_lo = Inf;  h_hi = -Inf;  ground = false;
+    for k = 1:numel(t_sorted)
+        r = wx_sorted(k);
+        if r < 1 || r > height(WX), continue; end
+        G = dtc_thermograph(WX.timestamp(r), WX.depth_m(r), WX.dtc_c(r, :), cfg);
+        if ~G.ok, continue; end
+        cols{end+1} = struct('t', t_sorted(k), ...
+                             'height_cm', G.height_cm, ...
+                             'temp_c', G.temp_c(:, 1)); %#ok<AGROW>
+        h_lo = min(h_lo, min(G.height_cm));
+        h_hi = max(h_hi, max(G.height_cm));
+        ground = ground || G.ground_row;
+    end
+    if isempty(cols)
+        return;
+    end
+    B.on = true;
+    B.cols = cols;
+    B.t_cap = cellfun(@(c) c.t, cols).';
+    B.h_lo = h_lo;
+    B.h_hi = h_hi;
+    B.height_cm = [h_lo; h_hi];
+    B.ground_row = ground;
+end
+
+
+function half = band_halfwidth(t0, t1, ax_px, band_px)
+% Half-width, as a duration, of a fixed-PIXEL-width band on a datetime axis.
+% Width is specified in pixels (not points) so it needs no DPI conversion and
+% stays meaningful headless. Falls back to a small fraction of the span when
+% the axes width or span is unusable, so a band is always visible.
+    span = t1 - t0;
+    fallback = 0.002;   % fraction of the x-span when pixel geometry is unusable
+    if ~isduration(span) || ~isfinite(seconds(span)) || span <= seconds(0)
+        half = seconds(0);
+        return;
+    end
+    usable = isnumeric(ax_px) && isscalar(ax_px) && isfinite(ax_px) && ax_px > 0 ...
+        && isnumeric(band_px) && isscalar(band_px) && isfinite(band_px) && band_px > 0;
+    if ~usable
+        half = 0.5 * fallback * span;
+        return;
+    end
+    half = 0.5 * min(double(band_px) / double(ax_px), 1) * span;
 end
 
 
