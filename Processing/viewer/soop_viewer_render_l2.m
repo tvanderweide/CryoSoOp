@@ -342,17 +342,24 @@ function soop_viewer_render_l2(V, kind)
         % reserves a bottom strip in the geometry plan.
         hour_on = S.cb_hourcolor.Value && ~S.cb_tod.Value && ...
                   any(strcmp(agg, {'Raw captures', 'Per-run mean'}));
+        % Color-by-SNR shares the single reserved colorbar strip with hour
+        % coloring; the controls are mutually exclusive, and hour wins if a
+        % stale state has both. snr_ok (not snrcut_usable) is the gate: it
+        % proves snrcut_apply ran with a valid cutoff, which is what pins the
+        % color floor to the cutoff actually applied.
+        snr_on = S.cb_snrcolor.Value && ~hour_on && snr_ok;
 
         % Fixed-position axes (not tiledlayout) so every overlay is placed
         % deterministically — no mid-render drawnow, no reading of dynamic
         % axes limits/position. wx_axes_plan owns the geometry: right-ruler
         % ownership (depth in meters when shown, else SWE in mm), the SWE
         % overlay slot when both series are shown, the temperature slot,
-        % and the manual hour-colorbar strip.
-        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, hour_on);
+        % and the manual point-color colorbar strip (hour or SNR).
+        color_on = hour_on || snr_on;
+        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, color_on);
         ax_pos = P.ax_pos;
         if show_snowtemp
-            if hour_on
+            if color_on
                 ax_pos = [ax_pos(1) 0.45 ax_pos(3) 0.48];
                 dtc_pos = [ax_pos(1) 0.19 ax_pos(3) 0.18];
             else
@@ -413,6 +420,36 @@ function soop_viewer_render_l2(V, kind)
             hcb.Label.String = 'nearest hour (capture timebase)';
             lh(end) = hsc;                   % legend binds the colored points
             st_dots(end+1) = hsc;            % dot area scales by (Pt x)^2
+        elseif snr_on
+            % Phase and SNR must summarize the SAME captures: aggregate()
+            % drops non-finite y BEFORE grouping, so aggregating them
+            % separately can change both group membership and the group
+            % midpoint (a retained row may carry finite SNR with a
+            % non-finite displayed phase). Mask jointly, then aggregate, and
+            % draw nothing if the two groupings still disagree.
+            keep_c = isfinite(y_ph) & isfinite(TC.snr_db);
+            t_c    = tcol(TC);
+            [ta_s, ya_s]  = M.aggregate(t_c(keep_c), y_ph(keep_c),      agg, ph_kind);
+            [tb_s, snr_a] = M.aggregate(t_c(keep_c), TC.snr_db(keep_c), agg, 'db');
+            fin = snr_a(isfinite(snr_a));
+            if ~isempty(fin) && isequal(size(ta_s), size(tb_s)) && isequaln(ta_s, tb_s)
+                h_phase.Marker = 'none';
+                hsc = scatter(ax, ta_s, ya_s, 36, snr_a, 'filled');
+                colormap(ax, parula);        % sequential — SNR has no meaningful zero
+                % Floor pinned to the cutoff actually applied, so "darkest =
+                % at threshold" reads the same in every date range; only the
+                % top floats. snr_cut is valid here because snr_ok gates snr_on.
+                lo = snr_cut;
+                hi = max(fin);
+                if hi <= lo, hi = lo + 1; end   % degenerate / single-value guard
+                clim(ax, [lo hi]);
+                hcb = colorbar(ax, 'southoutside');
+                hcb.Position = P.cb_pos;        % same reserved strip as hour color
+                ax.Position = ax_pos;
+                hcb.Label.String = 'SNR [dB]';
+                lh(end) = hsc;                  % legend binds the colored points
+                st_dots(end+1) = hsc;           % dot area scales by (Pt x)^2
+            end
         end
         if is_unwrap
             % Cumulative over the shown samples; auto limits.

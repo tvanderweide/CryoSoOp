@@ -145,12 +145,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [33 1]);
-    % Rows 24/25 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [34 1]);
+    % Rows 25/26 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    % The 28 px control rows are children 1-23 (the run of 28s below), so a
+    % The 28 px control rows are children 1-24 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -492,9 +492,23 @@ function soop_viewer_layout(V)
                     '(capture timebase; cyclic colormap). Available when ' ...
                     'aggregation is Raw captures or Per-run mean; on the ' ...
                     'candidates views the daily filter must also be off.'], ...
-        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+        'ValueChangedFcn', @(~,~) V.CB.on_pointcolor(V, 'hour'));
     S.hour_row = hour_row;
     S.hour_row.Visible = 'off';
+
+    % SNR point coloring — candidates family only (needs the product's
+    % snr_db column). Shares the one reserved colorbar strip with hour
+    % coloring, so on_pointcolor keeps the two mutually exclusive.
+    snrcolor_row = uigridlayout(info_gl, [1 1]);
+    snrcolor_row.Padding = [0 0 0 0];
+    S.cb_snrcolor = uicheckbox(snrcolor_row, 'Text', 'Color by SNR', 'Value', false, ...
+        'Tooltip', ['Color each displayed point by its correlation SNR (dB). ' ...
+                    'The color floor is pinned to the SNR cutoff actually ' ...
+                    'applied, so the darkest points sit at threshold. ' ...
+                    'Mutually exclusive with Color by hour.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.on_pointcolor(V, 'snr'));
+    S.snrcolor_row = snrcolor_row;
+    S.snrcolor_row.Visible = 'off';
 
     % Geometry-series toggles — shown only for 'Radar Cal: geometry (r2c / r1mc /
     % A_eff)'. Each checkbox draws one geometry series: r_2c (= r_d_m) and r_1mc

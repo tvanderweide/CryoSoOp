@@ -1022,14 +1022,14 @@ function test_style_layout_and_gating(tc)
     verifyEqual(tc, V.sp_ptsz.Step, 0.25);
     verifyEqual(tc, V.sp_abvfrz_nearest_linew.Step, 0.5);
 
-    % Placement: directly under the legend row; grid has 23 x 28 px control
+    % Placement: directly under the legend row; grid has 24 x 28 px control
     % rows before the two 56 px sub-grid rows.
     g = V.style_row.Parent;
     verifyEqual(tc, V.style_row.Layout.Row, ...
                 V.dd_legend.Parent.Layout.Row + 1);
-    verifyNumElements(tc, g.RowHeight, 33);
-    verifyEqual(tc, [g.RowHeight{1:23}], repmat(28, 1, 23));
-    verifyEqual(tc, [g.RowHeight{24:25}], [56 56]);
+    verifyNumElements(tc, g.RowHeight, 34);
+    verifyEqual(tc, [g.RowHeight{1:24}], repmat(28, 1, 24));
+    verifyEqual(tc, [g.RowHeight{25:26}], [56 56]);
 
     % The new modifier is directly under Daily capture nearest. It appears
     % only for the four MUOS Candidates plots and is selectable only while

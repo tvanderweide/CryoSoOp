@@ -17,7 +17,22 @@ function C = soop_viewer_callbacks()
     C.on_gap_slider = @on_gap_slider;
     C.on_gap_field = @on_gap_field;
     C.on_fringe_edit = @on_fringe_edit;
+    C.on_pointcolor = @on_pointcolor;
     C.set_family_rows = @set_family_rows;
+end
+
+
+function on_pointcolor(V, which)
+% Point coloring owns the single colorbar strip reserved on the phase axes,
+% so the two color modes are mutually exclusive: switching one on clears the
+% other. Switching one off leaves the other alone.
+    switch which
+        case 'hour'
+            if V.cb_hourcolor.Value, V.cb_snrcolor.Value = false; end
+        case 'snr'
+            if V.cb_snrcolor.Value, V.cb_hourcolor.Value = false; end
+    end
+    V.CB.refresh(V);
 end
 
 
@@ -34,7 +49,7 @@ function set_family_rows(V, is_cand, is_candidate_plot)
         'Visible', on);
     S.cb_snowtemp.Visible = matlab.lang.OnOffSwitchState(is_candidate_plot);
     set([S.tod_row, S.phline_row, S.snrcut_row, S.ovf_row, S.theory_row, ...
-         S.fringe_row, S.hour_row, S.style_row], 'Visible', on);
+         S.fringe_row, S.hour_row, S.snrcolor_row, S.style_row], 'Visible', on);
     nearest_on = matlab.lang.OnOffSwitchState(is_candidate_plot);
     set([S.abvfrz_nearest_row, S.abvfrz_nearest_width_row, ...
          S.snowtemp_nearest_row], 'Visible', nearest_on);
@@ -449,6 +464,8 @@ function render_now(V)
         % snr_db (S.CAND follows the Dataset dropdown, so re-check every
         % render). Products without snr_db disable the control.
         S.sp_snrcut.Enable = matlab.lang.OnOffSwitchState(V.U.snrcut_usable(S.CAND));
+        % Color-by-SNR reads the same column the spinner filters on.
+        S.cb_snrcolor.Enable = matlab.lang.OnOffSwitchState(V.U.snrcut_usable(S.CAND));
         % Overflow filter needs a found overflow list AND a base_name column
         % in the loaded candidate product; the tooltip names the resolved
         % list so the active source is visible (fail-visible when disabled).

@@ -134,7 +134,168 @@ function test_elevation_hour_inert_under_daily_aggregation(tc)
 end
 
 
+%% --- Color by SNR: control wiring ----------------------------------------
+
+function test_pointcolor_modes_are_mutually_exclusive(tc)
+% The two modes share one color bar, so checking either clears the other;
+% unchecking one leaves the other alone.
+    V = gated_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    V.cb_hourcolor.Value = true;
+    V.CB.on_pointcolor(V, 'hour');
+    verifyTrue(tc, V.cb_hourcolor.Value);
+    verifyFalse(tc, V.cb_snrcolor.Value);
+
+    V.cb_snrcolor.Value = true;
+    V.CB.on_pointcolor(V, 'snr');
+    verifyTrue(tc, V.cb_snrcolor.Value);
+    verifyFalse(tc, V.cb_hourcolor.Value, 'checking SNR must clear hour');
+
+    V.cb_hourcolor.Value = true;
+    V.CB.on_pointcolor(V, 'hour');
+    verifyFalse(tc, V.cb_snrcolor.Value, 'checking hour must clear SNR');
+
+    V.cb_hourcolor.Value = false;      % unchecking clears nothing else
+    V.CB.on_pointcolor(V, 'hour');
+    verifyFalse(tc, V.cb_hourcolor.Value);
+    verifyFalse(tc, V.cb_snrcolor.Value);
+end
+
+
+function test_snrcolor_row_matches_hour_row_visibility(tc)
+% The mutually exclusive pair is shown together across the candidates
+% family, including L2: Sensor data, and hidden together elsewhere.
+    V = gated_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    V.CB.set_family_rows(V, true, true);
+    verifyTrue(tc, logical(V.snrcolor_row.Visible));
+    V.CB.set_family_rows(V, true, false);      % L2: Sensor data
+    verifyTrue(tc, logical(V.snrcolor_row.Visible));
+    V.CB.set_family_rows(V, false, false);
+    verifyFalse(tc, logical(V.snrcolor_row.Visible));
+end
+
+
+function test_snrcolor_enable_needs_snr_column(tc)
+% Disabled when the loaded candidates product predates snr_db.
+    V = gated_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    t = datetime(2026, 1, 1) + hours(6);
+    V.dd_plot.Value = 'L2: Sensor data';
+
+    V.CAND = table(t, "cap1", 30, 'VariableNames', ...
+        {'timestamp', 'base_name', 'phase_raw_deg'});
+    V.CB.render_now(V);
+    verifyFalse(tc, logical(V.cb_snrcolor.Enable));
+
+    V.CAND = table(t, "cap1", 20, 30, 'VariableNames', ...
+        {'timestamp', 'base_name', 'snr_db', 'phase_raw_deg'});
+    V.CB.render_now(V);
+    verifyTrue(tc, logical(V.cb_snrcolor.Enable));
+end
+
+
+%% --- Color by SNR: render ------------------------------------------------
+
+function test_snrcolor_render_pins_floor_to_applied_cutoff(tc)
+% Color floor is the cutoff actually applied, not the configured default,
+% so "darkest = at threshold" holds in every date range.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.cb_snrcolor.Value = true;
+    V.sp_snrcut.Value = 12;
+    soop_viewer_render_l2(V, CAND_KIND);
+
+    hsc = findobj(V.panel, 'Type', 'scatter');
+    verifyNumElements(tc, hsc, 1);
+    ax = ancestor(hsc, 'axes');
+    verifyEqual(tc, ax.CLim(1), 12, 'floor must equal the applied cutoff');
+    verifyEqual(tc, ax.CLim(2), 40, 'top follows the displayed maximum');
+    verifyEqual(tc, sort(hsc.CData(:)), [12; 20; 40], 'AbsTol', 1e-9);
+
+    cb = findobj(V.panel, 'Type', 'ColorBar');
+    verifyTrue(tc, any(strcmp({cb.Label}, 'SNR [dB]') | ...
+        cellfun(@(L) strcmp(L.String, 'SNR [dB]'), {cb.Label})));
+end
+
+
+function test_snrcolor_joint_mask_keeps_color_aligned_with_phase(tc)
+% aggregate() drops non-finite y before grouping, so a row with finite SNR
+% but non-finite displayed phase must not contribute a colour of its own.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.CAND.corr_41622(2) = NaN;        % finite SNR, non-finite phase
+    V.cb_snrcolor.Value = true;
+    soop_viewer_render_l2(V, CAND_KIND);
+
+    hsc = findobj(V.panel, 'Type', 'scatter');
+    verifyNumElements(tc, hsc, 1);
+    verifyNumElements(tc, hsc.CData, numel(hsc.XData), ...
+        'one colour per drawn point');
+    verifyNumElements(tc, hsc.XData, 2, 'the non-finite phase row drops out');
+    verifyEqual(tc, sort(hsc.CData(:)), [12; 40], 'AbsTol', 1e-9, ...
+        'the dropped row must not contribute its SNR');
+end
+
+
+function test_snrcolor_hour_wins_when_both_set(tc)
+% A stale state with both checked draws the hour colormap only.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.cb_hourcolor.Value = true;
+    V.cb_snrcolor.Value  = true;
+    soop_viewer_render_l2(V, CAND_KIND);
+
+    ax = ancestor(findobj(V.panel, 'Type', 'scatter'), 'axes');
+    verifyEqual(tc, ax.CLim, [0 24], 'hour coloring must win');
+end
+
+
+function test_snrcolor_off_when_cutoff_not_applied(tc)
+% snr_ok false (product without snr_db) means no colour floor can be
+% justified, so the render draws no coloring even with the box checked.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.CAND = removevars(V.CAND, 'snr_db');
+    V.cb_snrcolor.Value = true;
+    soop_viewer_render_l2(V, CAND_KIND);
+
+    verifyEmpty(tc, findobj(V.panel, 'Type', 'scatter'));
+end
+
+
+function test_snrcolor_single_point_guard(tc)
+% One surviving point gives a degenerate max; CLim must stay increasing.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.cb_snrcolor.Value = true;
+    V.sp_snrcut.Value = 40;            % keeps the single 40 dB capture
+    soop_viewer_render_l2(V, CAND_KIND);
+
+    ax = ancestor(findobj(V.panel, 'Type', 'scatter'), 'axes');
+    verifyGreaterThan(tc, ax.CLim(2), ax.CLim(1));
+    verifyEqual(tc, ax.CLim(1), 40);
+end
+
+
 %% --- Fixtures ------------------------------------------------------------
+
+function k = CAND_KIND()
+    k = 'L2: Candidates — MUOS-5 (41622)';
+end
+
+
+function V = candidates_viewer(tc) %#ok<INUSD>
+% Three captures on one day with distinct SNRs spanning the default cutoff.
+    V = build_viewer(minimal_cfg());
+    t = datetime(2026, 1, 1) + hours([2; 9; 16]);
+    V.CAND = table(t, "cap" + string((1:3)'), [12; 20; 40], (10:10:30)', ...
+        'VariableNames', {'timestamp', 'base_name', 'snr_db', 'corr_41622'});
+    V.dp1.Value = dateshift(t(1), 'start', 'day');
+    V.dp2.Value = dateshift(t(end), 'start', 'day');
+end
 
 function cfg = minimal_cfg()
     cfg = struct('freq_hz', 370e6, 'fs', 20e6, 'num_segs', 2, 'Ti', 0.9, ...
