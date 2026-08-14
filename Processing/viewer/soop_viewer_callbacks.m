@@ -419,6 +419,12 @@ function render_now(V)
     is_cand = V.U.is_cand_kind(kind);
     is_candidate_plot = startsWith(kind, 'L2: Candidates');
     set_family_rows(V, is_cand, is_candidate_plot);
+
+    % Hour coloring also applies to the satellite-elevation view, which draws
+    % from the L2 product CSV and sits outside the candidates family.
+    is_elev = strcmp(kind, 'L2: Satellite elevation');
+    S.hour_row.Visible = matlab.lang.OnOffSwitchState(is_cand || is_elev);
+
     if is_cand
         % These overlay panels draw ONE phase column, so the multi-domain
         % 'Compare all' selection is meaningless here — snap the dropdown to
@@ -427,11 +433,15 @@ function render_now(V)
         if strcmp(V.U.domain_mode(V), 'compare')
             S.dd_domain.Value = 'fd';
         end
-        % Hour coloring keeps hour identity only without the daily filter
-        % and under Raw captures / Per-run mean; the render re-checks the
-        % same predicate, so a checked-but-disabled box draws nothing.
-        hour_ok = ~S.cb_tod.Value && ...
-                  any(strcmp(S.dd_agg.Value, {'Raw captures', 'Per-run mean'}));
+    end
+    if is_cand || is_elev
+        % Hour coloring keeps hour identity only under Raw captures / Per-run
+        % mean. The daily filter subsets rows in the candidates branch only —
+        % the elevation branch never applies it — so elevation is gated on
+        % aggregation alone. The render re-checks the same predicate, so a
+        % checked-but-disabled box draws nothing.
+        hour_ok = any(strcmp(S.dd_agg.Value, {'Raw captures', 'Per-run mean'})) && ...
+                  (is_elev || ~S.cb_tod.Value);
         S.cb_hourcolor.Enable = matlab.lang.OnOffSwitchState(hour_ok);
     end
     if is_cand

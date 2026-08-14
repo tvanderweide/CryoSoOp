@@ -760,9 +760,27 @@ function soop_viewer_render_l2(V, kind)
 
     switch kind
         case 'L2: Satellite elevation'
-            plot_series(ax, t, T.theta_deg, agg, 'lin');
+            h_el = plot_series(ax, t, T.theta_deg, agg, 'lin');
             ylabel(ax, 'Elevation (deg)');
             title(ax, 'Satellite elevation at capture times');
+            % Hour-of-day coloring. The render re-checks the callbacks' Enable
+            % predicate (the daily filter never reaches this branch, so only
+            % aggregation matters), which keeps a checked-but-disabled box
+            % inert. Colors come from the SAME aggregate the drawn points use,
+            % so marker position and color always describe one group.
+            if S.cb_hourcolor.Value && ...
+               any(strcmp(agg, {'Raw captures', 'Per-run mean'}))
+                [ta_h, ya_h] = M.aggregate(t, T.theta_deg, agg, 'lin');
+                h_el.Marker = 'none';      % keep error bars, hide plain markers
+                hold(ax, 'on');
+                scatter(ax, ta_h, ya_h, 36, V.U.hour_bins(ta_h) + 0.5, 'filled');
+                colormap(ax, hsv(24));     % cyclic map for a cyclic hour
+                clim(ax, [0 24]);
+                hcb = colorbar(ax);
+                hcb.Ticks      = (0:4:20) + 0.5;   % bin centers — there is no hour 24
+                hcb.TickLabels = compose('%d', 0:4:20);
+                hcb.Label.String = 'nearest hour (capture timebase)';
+            end
         case 'L2: Satellite Azimuth'
             if ~ismember('az_deg', T.Properties.VariableNames)
                 show_msg(['Azimuth needs the az_deg column — re-run ' ...
