@@ -616,9 +616,9 @@ function test_wx_temp_blank_entry_loader(tc)
 end
 
 function test_wx_depth_cols_override(tc)
-    % Renamed distance/depth headers load via cfg.wx_depth_cols; both depth
-    % headers are REQUIRED — a missing one returns an empty WX (documented
-    % all-or-nothing contract; every overlay unavailable).
+    % Renamed distance/depth headers load via cfg.wx_depth_cols. Depth is
+    % optional like every other sensor: without the override the default
+    % headers are absent, so depth_m is all-NaN while SWE still loads.
     n = 20;
     [ts, base] = regular_series(tc, n);
     cols = full_cols();  cols{1} = 'Dist_K_Avg';  cols{2} = 'Depth_K_Avg';
@@ -627,10 +627,14 @@ function test_wx_depth_cols_override(tc)
                   struct('wx_depth_cols', {{'Dist_K_Avg', 'Depth_K_Avg'}})); %#ok<CCAT>
     verifyEqual(tc, height(WX), n);
     verifyEqual(tc, WX.depth_m, ones(n, 1));
-    % Same file WITHOUT the override: default headers absent -> empty WX.
-    WX2 = load_fix(tc, 'dovr.dat', cols, ...
-                   {ts, base{:}, 400 * ones(n, 1), zeros(n, 1)}); %#ok<CCAT>
-    verifyTrue(tc, isempty(WX2));
+    % Same file WITHOUT the override: default headers absent -> NaN depth,
+    % every other sensor unaffected.
+    WX2 = verifyWarning(tc, @() load_fix(tc, 'dovr.dat', cols, ...
+                   {ts, base{:}, 400 * ones(n, 1), zeros(n, 1)}), ...
+                   'BrundageSoOp:snodar'); %#ok<CCAT>
+    verifyEqual(tc, height(WX2), n);
+    verifyTrue(tc, all(isnan(WX2.depth_m)));
+    verifyEqual(tc, WX2.swe_mm, 400 * ones(n, 1));
 end
 
 function test_wx_temp_labels_policy(tc)

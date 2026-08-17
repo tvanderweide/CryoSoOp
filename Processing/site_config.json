@@ -51,6 +51,9 @@
     "wx_dtc_cols": "DTC_Avg(%d)",
     "wx_dtc_sensor_spacing_cm": 10.16,
     "wx_dtc_bottom_height_cm": -25.4,
-    "wx_dtc_order": "top_to_bottom"
+    "wx_dtc_order": "top_to_bottom",
+    "wx_soil_vwc_cols": "SoilVUE_VWC_%dcm_Avg",
+    "wx_soil_rod_cm": [60, 75, 100],
+    "wx_soil_surface_rod_cm": 55
   }
 }

@@ -398,17 +398,19 @@ end
 function WX = load_snodar(cfg)
 % Load and clean the Brundage weather station SNOdar data from a Campbell TOA5 file.
 % Returns a table with columns {timestamp (datetime), depth_m, airtc_c, temp_c,
-% swe_mm, dtc_c}. dtc_c is rows by sensors in configured cable order, deg C.
+% swe_mm, dtc_c, soil_vwc}. dtc_c is rows by sensors in configured cable order,
+% deg C; soil_vwc is rows by rod positions in configured order, m^3/m^3.
 % The two temperature columns (cfg.wx_temp_cols, default AirTC_Avg / Temp_C_Avg)
 % feed the viewer's toggleable SNOdar-overlay temperature lines — or, with the
 % viewer's AboveFreezing box, its orange above-freezing (wet-snow) band layer.
 % swe_mm is the snow-scale SWE (cfg.wx_swe_cols, default SS_SWE_Avg masked by
 % SS_SWE_ErrCode_Avg; mm water column) feeding the viewer's SWE overlay line —
-% error-code-masked (fail closed), spike-filtered, all-NaN when the sensor's
-% value column is absent. Depth reads cfg.wx_depth_cols {distance, snow_depth}
-% (defaults SnoDAR_distance_Avg / SnoDAR_snow_depth_Avg); BOTH depth headers
-% are required — either missing returns an empty WX. All three cfg.wx_*_cols
-% overrides are set per site in BrundageSoOp.m's weather block.
+% error-code-masked (fail closed), spike-filtered. Depth reads cfg.wx_depth_cols
+% {distance, snow_depth} (defaults SnoDAR_distance_Avg / SnoDAR_snow_depth_Avg);
+% soil_vwc reads cfg.wx_soil_vwc_cols (see soil_column_names). Every sensor is
+% optional and independent: a missing header NaN-fills only its own column, so
+% one absent sensor never blocks the rest of the file from loading. The
+% cfg.wx_*_cols overrides are set per site in BrundageSoOp.m's weather block.
 %
 % Timestamp timebase: when cfg.wx_tz is set (the logger's clock zone — Campbell
 % loggers run FIXED standard time year-round, no DST), timestamps are converted
@@ -446,16 +448,18 @@ function WX = load_snodar(cfg)
         hdr = strtrim(string(strsplit(string(fgetl(fid)), ',')));
         fgetl(fid);                          % units (skip)
         fgetl(fid);                          % processing types (skip)
-        % Snow-depth columns {distance, snow_depth} — BOTH required (either
-        % missing returns an empty WX: every weather overlay unavailable).
-        % cfg.wx_depth_cols overrides the two header names per site.
+        % Snow-depth columns {distance, snow_depth} — optional, like every other
+        % sensor here: a missing header NaN-fills depth_m and warns rather than
+        % dropping the whole table, so the remaining sensors still reach the
+        % viewer. distance feeds only the drift flag, so losing it costs that QC
+        % check but not the depth series. cfg.wx_depth_cols overrides the two
+        % header names per site.
         depth_cols = {'SnoDAR_distance_Avg', 'SnoDAR_snow_depth_Avg'};
         if isfield(cfg, 'wx_depth_cols') && numel(cfg.wx_depth_cols) >= 2
             depth_cols = cfg.wx_depth_cols(1:2);
         end
         dist_col  = find(hdr == string(depth_cols{1}), 1);
         depth_col = find(hdr == string(depth_cols{2}), 1);
-        if isempty(dist_col) || isempty(depth_col), fclose(fid); return; end
 
         % Temperature columns for the viewer overlay (no drift/spike filter —
         % those are depth-specific). cfg.wx_temp_cols overrides the two header
@@ -495,6 +499,19 @@ function WX = load_snodar(cfg)
             if ~isempty(found), dtc_col(dk) = found; end
         end
 
+        % SoilVUE volumetric water content (m^3/m^3) for the viewer overlay —
+        % optional sensor. cfg.wx_soil_rod_cm lists ROD POSITIONS in cm, which
+        % is what the logger headers name; the probe's upper section sits above
+        % ground, so rod position is not depth below ground. Column order
+        % follows the configured rod order and is preserved end to end, so a
+        % missing header keeps its slot as an all-NaN column.
+        soil_names = soil_column_names(cfg);
+        soil_col = zeros(1, numel(soil_names));
+        for sk = 1:numel(soil_names)
+            found = find(hdr == string(soil_names{sk}), 1);
+            if ~isempty(found), soil_col(sk) = found; end
+        end
+
         % Read all fields as strings — handles quoted timestamps, NAN, unquoted numbers.
         n_cols = numel(hdr);
         fmt    = repmat('%q ', 1, n_cols);
@@ -502,9 +519,7 @@ function WX = load_snodar(cfg)
         fclose(fid);
         data = C{1};   % n_rows × n_cols cell array of strings
 
-        ts_raw    = strtrim(data(:, 1));
-        dist_raw  = strtrim(data(:, dist_col));
-        depth_raw = strtrim(data(:, depth_col));
+        ts_raw = strtrim(data(:, 1));
 
         % Parse timestamps (may or may not be quoted in TOA5)
         ts = NaT(size(data, 1), 1);
@@ -513,11 +528,28 @@ function WX = load_snodar(cfg)
             ts(pv) = datetime(ts_raw(pv), 'InputFormat', 'yyyy-MM-dd HH:mm:ss');
         end
 
-        dist_num  = str2double(dist_raw);
-        depth_num = str2double(depth_raw);
+        n_rows = size(data, 1);
+
+        % Snow depth (m) and the raw sensor distance (m) that pairs with it for
+        % the drift flag: parse if present, else NaN-fill + warn. An all-NaN
+        % dist_num leaves every drift comparison false, so the depth series
+        % passes through unflagged instead of being wiped.
+        if ~isempty(depth_col)
+            depth_num = str2double(strtrim(data(:, depth_col)));
+        else
+            depth_num = nan(n_rows, 1);
+            warning('BrundageSoOp:snodar', 'Snow-depth column "%s" not found.', depth_cols{2});
+        end
+        if ~isempty(dist_col)
+            dist_num = str2double(strtrim(data(:, dist_col)));
+        else
+            dist_num = nan(n_rows, 1);
+            warning('BrundageSoOp:snodar', ...
+                'Sensor-distance column "%s" not found — depth drift flag unavailable.', ...
+                depth_cols{1});
+        end
 
         % Temperatures (deg C): parse if the column is present, else NaN-fill + warn.
-        n_rows = size(data, 1);
         if ~isempty(airtc_col)
             airtc_num = str2double(strtrim(data(:, airtc_col)));
         else
@@ -561,6 +593,18 @@ function WX = load_snodar(cfg)
             end
         end
 
+        % SoilVUE VWC (m^3/m^3): one column per configured rod position, in
+        % configured order. A configured header the logger does not carry stays
+        % all-NaN in its own slot so the remaining rods keep their positions.
+        soil_vwc = nan(n_rows, numel(soil_names));
+        for sk = 1:numel(soil_names)
+            if soil_col(sk) ~= 0
+                v = str2double(strtrim(data(:, soil_col(sk))));
+                v(~isfinite(v)) = NaN;
+                soil_vwc(:, sk) = v;
+            end
+        end
+
         % Calibration drift: flag rows where distance + snow_depth exceeds threshold.
         drift_mask = (dist_num + depth_num) > drift_thr;
         depth_num(drift_mask | ~isfinite(depth_num)) = NaN;
@@ -573,6 +617,7 @@ function WX = load_snodar(cfg)
         tempc_num = tempc_num(keep);
         swe_num   = swe_num(keep);
         dtc_num   = dtc_num(keep, :);
+        soil_vwc  = soil_vwc(keep, :);
 
         % Weather logger clock -> capture timebase (see header). Brundage logger
         % zone is 'Etc/GMT+7' — POSIX sign convention: Etc/GMT+7 IS UTC-7. An
@@ -613,8 +658,9 @@ function WX = load_snodar(cfg)
         swe_num(abs(swe_num - swe_ref) > swe_spike_thr | ...
                 (isfinite(swe_num) & swe_n < swe_min_support)) = NaN;
 
-        WX = table(ts, depth_num, airtc_num, tempc_num, swe_num, dtc_num, ...
-            'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c', 'swe_mm', 'dtc_c'});
+        WX = table(ts, depth_num, airtc_num, tempc_num, swe_num, dtc_num, soil_vwc, ...
+            'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c', 'swe_mm', ...
+                              'dtc_c', 'soil_vwc'});
         WX = sortrows(WX, 'timestamp');
     catch ME
         warning('BrundageSoOp:snodar', 'SNOdar load failed: %s', ME.message);
@@ -643,4 +689,31 @@ function names = dtc_column_names(cfg, hdr)
         end
         names{end+1} = nm; %#ok<AGROW>
     end
+end
+
+
+function names = soil_column_names(cfg)
+% Resolve SoilVUE VWC headers from a printf-style pattern substituted with the
+% configured ROD POSITIONS in cm (cfg.wx_soil_rod_cm — the numbers the logger
+% headers carry, not depth below ground), or from an explicit ordered list.
+% Every configured slot is returned in configured order and none is dropped, so
+% a header the logger does not carry keeps its position as an all-NaN column
+% instead of shifting its neighbours — unlike the DTC pattern, which expands
+% sequentially until a header is missing. Returns empty when the sensor is not
+% configured: rod geometry is site-specific and is never guessed.
+    names = {};
+    if ~isfield(cfg, 'wx_soil_vwc_cols') || isempty(cfg.wx_soil_vwc_cols)
+        return;
+    end
+    spec = cfg.wx_soil_vwc_cols;
+    if ~(ischar(spec) || (isstring(spec) && isscalar(spec)))
+        names = cellstr(spec);      % explicit ordered header list
+        return;
+    end
+    if ~isfield(cfg, 'wx_soil_rod_cm') || isempty(cfg.wx_soil_rod_cm)
+        return;                     % pattern with no rod positions to fill it
+    end
+    rods = double(cfg.wx_soil_rod_cm(:))';
+    rods = rods(isfinite(rods));
+    names = arrayfun(@(r) sprintf(char(spec), r), rods, 'UniformOutput', false);
 end

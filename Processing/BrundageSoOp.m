@@ -65,7 +65,7 @@ cfg.wx_dat       = site.weather.wx_dat;
 if isfield(site.weather, 'wx_temp_cols') && ~isempty(site.weather.wx_temp_cols)
     cfg.wx_temp_cols = reshape(site.weather.wx_temp_cols, 1, []);  % weather temperature column names
 end
-% wx_depth_cols is {distance, snow_depth} — both required by load_snodar.
+% wx_depth_cols is {distance, snow_depth}; distance feeds only the drift flag.
 if isfield(site.weather, 'wx_depth_cols') && ~isempty(site.weather.wx_depth_cols)
     cfg.wx_depth_cols = reshape(site.weather.wx_depth_cols, 1, []);
 end
@@ -82,6 +82,20 @@ for dtc_k = 1:numel(dtc_fields)
     dtc_f = dtc_fields{dtc_k};
     if isfield(site.weather, dtc_f) && ~isempty(site.weather.(dtc_f))
         cfg.(dtc_f) = site.weather.(dtc_f);
+    end
+end
+% SoilVUE soil-moisture configuration. wx_soil_rod_cm lists ROD POSITIONS in
+% centimeters — the numbers the logger headers carry — not depth below ground:
+% the probe is installed with its upper section above the surface, which sits
+% at wx_soil_surface_rod_cm on that same rod scale. Displayed depth below
+% ground is rod position minus surface position. Only rod segments buried in
+% soil belong here; segments in air or snow read below the sensor's calibrated
+% permittivity range and return zero water content.
+soil_fields = {'wx_soil_vwc_cols', 'wx_soil_rod_cm', 'wx_soil_surface_rod_cm'};
+for soil_k = 1:numel(soil_fields)
+    soil_f = soil_fields{soil_k};
+    if isfield(site.weather, soil_f) && ~isempty(site.weather.(soil_f))
+        cfg.(soil_f) = site.weather.(soil_f);
     end
 end
 % Set wx_tz when logger timestamps need conversion to cfg.capture_tz.

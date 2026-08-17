@@ -50,6 +50,9 @@ function U = soop_viewer_util()
     U.wx_temp_labels = @wx_temp_labels;
     U.dtc_thermograph = @dtc_thermograph;
     U.dtc_renderable = @dtc_renderable;
+    U.soil_geometry = @soil_geometry;
+    U.soil_usable = @soil_usable;
+    U.soil_color = @soil_color;
     U.nearest_wx_idx = @nearest_wx_idx;
     U.band_halfwidth = @band_halfwidth;
     U.snowtemp_nearest_bands = @snowtemp_nearest_bands;
@@ -1506,6 +1509,77 @@ function tf = dtc_has_extent(depth_cm, sensor_h)
 % the lowest sensor. Shared by dtc_thermograph and dtc_renderable so a profile
 % can never be declared renderable and then collapse to a single height row.
     tf = isfinite(depth_cm) && depth_cm > min(sensor_h);
+end
+
+
+function G = soil_geometry(cfg)
+% Resolve the SoilVUE overlay's rod geometry and legend labels from cfg.
+% cfg.wx_soil_rod_cm holds ROD POSITIONS in cm — the numbers the logger headers
+% carry — and cfg.wx_soil_surface_rod_cm is the rod position of the soil
+% surface, so depth below ground is rod position minus surface position. THE ONE
+% place that subtraction lives, so labels and gating cannot disagree. Order is
+% the configured order, which is the column order of WX.soil_vwc.
+    G = struct('ok', false, 'why', '', 'rod_cm', [], 'depth_cm', [], ...
+               'surface_cm', NaN, 'labels', {{}});
+    if ~isfield(cfg, 'wx_soil_rod_cm') || isempty(cfg.wx_soil_rod_cm) || ...
+            ~isnumeric(cfg.wx_soil_rod_cm)
+        G.why = 'Soil rod positions are not configured.';
+        return;
+    end
+    rod = double(cfg.wx_soil_rod_cm(:))';
+    if ~all(isfinite(rod))
+        G.why = 'Soil rod positions must all be finite.';
+        return;
+    end
+    surface = 0;
+    if isfield(cfg, 'wx_soil_surface_rod_cm') && ~isempty(cfg.wx_soil_surface_rod_cm)
+        surface = cfg.wx_soil_surface_rod_cm;
+    end
+    if ~(isnumeric(surface) && isscalar(surface) && isfinite(surface))
+        G.why = 'Soil surface rod position is invalid.';
+        return;
+    end
+    G.rod_cm     = rod;
+    G.surface_cm = double(surface);
+    G.depth_cm   = rod - G.surface_cm;      % below ground, positive downward
+    G.labels     = arrayfun(@(d) sprintf('%g cm', d), G.depth_cm, ...
+                            'UniformOutput', false);
+    G.ok = true;
+end
+
+
+function ok = soil_usable(WX, cfg)
+% True when the soil-moisture overlay has something to draw: configured rod
+% geometry, a soil_vwc column whose width matches that geometry, and at least
+% one finite value. A width mismatch fails rather than drawing, because the
+% column order carries the depth labels — mislabeled depths would be worse than
+% no overlay. Segments in air or snow read exactly 0 (below the sensor's
+% calibrated permittivity range), which is finite and legitimately drawable.
+    ok = false;
+    if ~istable(WX) || ~ismember('soil_vwc', WX.Properties.VariableNames)
+        return;
+    end
+    G = soil_geometry(cfg);
+    if ~G.ok
+        return;
+    end
+    v = WX.soil_vwc;
+    ok = isnumeric(v) && size(v, 2) == numel(G.rod_cm) && any(isfinite(v(:)));
+end
+
+
+function c = soil_color(k)
+% Line color for the k-th soil-moisture depth, cycling through an earth-toned
+% ramp that darkens with depth. Distinct from the DTC thermograph's diverging
+% temperature map and from the teal SWE / black depth overlay lines.
+    ramp = [0.72 0.53 0.24;    % shallowest — light ochre
+            0.55 0.36 0.16;
+            0.36 0.22 0.09];   % deepest — dark brown
+    if ~(isnumeric(k) && isscalar(k) && isfinite(k) && k >= 1)
+        c = ramp(1, :);
+        return;
+    end
+    c = ramp(mod(round(k) - 1, size(ramp, 1)) + 1, :);
 end
 
 
