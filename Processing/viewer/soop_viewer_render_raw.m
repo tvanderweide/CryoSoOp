@@ -52,7 +52,7 @@ function soop_viewer_render_raw(V, kind)
                 end
 
                 % If time domain gating was used, some samples are now
-                % exactly 0, and an active fraction is calculated to scale 
+                % exactly 0, and an active fraction is calculated to scale
                 % the PSD back up.
                 duty_cycle0 = sum(ch0 ~= 0) / numel(ch0);
                 duty_cycle1 = sum(ch1 ~= 0) / numel(ch1);
@@ -63,7 +63,7 @@ function soop_viewer_render_raw(V, kind)
                 if duty_cycle1 > 0 && duty_cycle1 < 1.0
                     P1_full = P1_full / duty_cycle1;
                 end
-                
+
                 [D.f,  D.P0] = M.decimate_spectrum(f_full, P0_full, 4000, 'mean');
                 [~,    D.P1] = M.decimate_spectrum(f_full, P1_full, 4000, 'mean');
             case 'Raw: Cross-correlation profile'
@@ -413,7 +413,7 @@ function [ch0, ch1] = rr_load_capture(V, base)
     % Temporal gating not applied to noise or load
     is_calib = contains(string(base), {'_L_', '_NL_', '_Load_'}, 'IgnoreCase', true);
     if isfield(cfg, 'toggle') && cfg.toggle && ~is_calib
-        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);   
+        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);
         if isfield(cfg, 'mode')
             gate_mode = cfg.mode;
         end

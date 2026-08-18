@@ -6,7 +6,7 @@
     "lon": -116.133436,
     "alt_m": 2247.113,
     "tower_h_m": 6.096,
-    "capture_tz": "UTC",
+    "capture_tz": "America/Boise",
     "ant_gain_direct_dbi": 4.1,
     "ant_gain_reflected_dbi": 4.1,
     "ant_pol_direct": "RHCP",
@@ -25,25 +25,25 @@
     "T_load_K": 303
   },
   "season": {
-    "start": "2026-01-01",
-    "end": "2026-08-22",
+    "start": "2025-11-24",
+    "end": "2026-06-12",
     "norad": 41622,
     "candidate_norads": [38093, 41622]
   },
   "paths": {
     "hpc": {
-      "data_dir": "/global/scratch/users/mgirotto/Pband_data/DataPBand/",
-      "input_dir": "/global/scratch/users/mgirotto/Pband_data/PostProcess/Static/",
-      "out_dir": "/global/scratch/users/mgirotto/Pband_data/PostProcess/Output/",
-      "matlab_jobs": "/global/scratch/users/mgirotto/Pband_data/PostProcess/matlab_jobs/"
+      "data_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/Data/",
+      "input_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/Static",
+      "out_dir": "/bsuscratch/thomasvanderweide/BrundageSoOp/2026-07-17/",
+      "matlab_jobs": "/bsuscratch/thomasvanderweide/BrundageSoOp/matlab_jobs"
     },
     "local": {
-      "data_dir": "C:\\Users\\edwar\\OneDrive\\Desktop\\CRREL_SoOp\\Old_Data",
-      "input_dir": "C:\\Users\\edwar\\OneDrive\\Desktop\\CRREL_SoOp\\Old_Static",
-      "out_dir": "C:\\Users\\edwar\\OneDrive\\Desktop\\CRREL_SoOp\\New_Output"
+      "data_dir": "F:\\Data\\",
+      "input_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\Static",
+      "out_dir": "C:\\Users\\thomasvanderweide\\Documents\\Data\\BrundageSoOp\\2026-07-17\\"
     }
   },
-"weather": {
+  "weather": {
     "wx_dat": "C:\\Users\\thomasvanderweide\\Documents\\Projects\\CryoSoOp\\Background\\20260608_Brundage_15Min.dat",
     "wx_temp_cols": ["AirTC_Avg", "Temp_C_Avg"],
     "wx_depth_cols": ["SnoDAR_distance_Avg", "SnoDAR_snow_depth_Avg"],
@@ -55,7 +55,7 @@
   },
   "gating": {
     "toggle": true,
-    "mode": "quiet", 
+    "mode": "quiet",
     "window_ms": 0.5,
     "transition_ms": 2.0
   }

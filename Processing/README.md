@@ -91,7 +91,7 @@ site's copy under another name). Checklist:
      IS UTC−7). When set, weather timestamps are converted into the capture
      timebase so the viewer overlay aligns; when absent, they pass through
      unconverted (the legacy-season behavior).
-   - `gating`: set `"toggle": = true` if using CSSL data with ~100ms periodic RFI 
+   - `gating`: set `"toggle": = true` if using CSSL data with ~100ms periodic RFI
      pulses. Pipeline will adapt to process the quiet MUOS data by default,
      or process the loud RFI data if mode = `'loud'`. Can change window and
      transition band length if needed.

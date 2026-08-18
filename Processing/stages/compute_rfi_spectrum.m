@@ -31,8 +31,8 @@ function compute_rfi_spectrum(cfg)
     ap.mode      = getdef(cfg, 'mode', 'quiet');     % if gating toggled on, looks at quiet (MUOS) signal, not RFI pulse signal
     ap.window_ms = getdef(cfg, 'window_ms', 0.5);    % default val has been tested and works well
     ap.transition_ms  = getdef(cfg, 'transition_ms', 2.0);     % default val has been tested and works well
-    % If gating is enabled, scale up the samples read per file to ensure that 
-    % after masking RFI bursts, there are still adequate segments to average. 
+    % If gating is enabled, scale up the samples read per file to ensure that
+    % after masking RFI bursts, there are still adequate segments to average.
     if ap.toggle
         ap.n_read = getdef(cfg, 'rfi_read_samples', 128 * ap.seg_len);
     else
@@ -269,7 +269,6 @@ function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, exc
     else
         active_mask = true(size(ch0));
     end
-    
     nseg = floor(n / L);
     m_accum = 0;
 

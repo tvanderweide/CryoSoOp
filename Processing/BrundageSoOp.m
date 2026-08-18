@@ -46,7 +46,7 @@ cfg.T_load_K     = site.sdr.T_load_K;      % calibration load temperature (K)
 
 % Gating settings defined in site_config.json, see docs/config-reference.md.
 cfg.toggle        = site.gating.toggle;         % if gating for CSSL RFI should occur
-cfg.mode          = site.gating.mode;           % type of data to save         
+cfg.mode          = site.gating.mode;           % type of data to save
 cfg.window_ms     = site.gating.window_ms;      % length of rolling window (ms)
 cfg.transition_ms = site.gating.transition_ms;  % length of transition band (ms)
 
@@ -176,8 +176,8 @@ cfg.sigma0_corr_family    = 'fd_muos'; % correlation family for L1 amplitude and
 
 %% Processing toggles
 % Process on the HPC by default; set toggles manually for local runs.
-run_L1    = true;
-run_calib = true;
+run_L1    = on_hpc;
+run_calib = on_hpc;
 run_snr   = false;   % needs the L1 CSV; run after the first full L1 pass
 run_satid = false;    % compare_sat_candidates: produces sat_candidates_corrected.csv
 run_L2    = false;    % needs cfg.elev_table for the CONFIRMED satellite

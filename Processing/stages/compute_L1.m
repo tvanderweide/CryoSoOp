@@ -362,12 +362,10 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
     % Time-domain gating for CSSL RFI pulses
     if isfield(cfg, 'toggle') && cfg.toggle
         [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);
-        fprintf('doing gating in L1')
         switch lower(cfg.mode)
             case 'quiet'
                 ch0 = ch0 .* quiet_mask;
                 ch1 = ch1 .* quiet_mask;
-                fprintf('using quiet')
             case 'loud'
                 ch0 = ch0 .* loud_mask;
                 ch1 = ch1 .* loud_mask;
