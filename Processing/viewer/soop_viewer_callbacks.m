@@ -32,12 +32,19 @@ function set_family_rows(V, is_cand, is_candidate_plot)
     on = matlab.lang.OnOffSwitchState(is_cand);
     set([S.cb_depth, S.cb_swe, S.cb_airtc, S.cb_tempc, S.cb_abvfrz], ...
         'Visible', on);
+    S.cb_snowtemp.Visible = matlab.lang.OnOffSwitchState(is_candidate_plot);
     set([S.tod_row, S.phline_row, S.snrcut_row, S.ovf_row, S.theory_row, ...
          S.fringe_row, S.hour_row, S.style_row], 'Visible', on);
-    S.abvfrz_nearest_row.Visible = ...
-        matlab.lang.OnOffSwitchState(is_candidate_plot);
+    nearest_on = matlab.lang.OnOffSwitchState(is_candidate_plot);
+    set([S.abvfrz_nearest_row, S.abvfrz_nearest_width_row, ...
+         S.snowtemp_nearest_row], 'Visible', nearest_on);
     S.cb_abvfrz_nearest.Enable = ...
         matlab.lang.OnOffSwitchState(is_candidate_plot && S.cb_tod.Value);
+    % Needs both prerequisites: the daily filter defines "nearest", and there
+    % is no thermograph to modify unless SnowTemp is on. Disabling leaves the
+    % checked value intact, like the other modifier controls.
+    S.cb_snowtemp_nearest.Enable = matlab.lang.OnOffSwitchState( ...
+        is_candidate_plot && S.cb_tod.Value && S.cb_snowtemp.Value);
 end
 
 

@@ -393,6 +393,8 @@ function test_render_above_freezing_nearest_wrapped_and_unwrapped(tc)
     V.cb_airtc.Value = true;
     V.cb_abvfrz.Value = true;
     V.cb_abvfrz_nearest.Value = true;
+    V.sp_abvfrz_nearest_linew.Value = 8;
+    V.sp_linew.Value = 2;      % must not affect the dedicated rule width
     kinds = {'L2: Candidates — MUOS-5 (41622)', ...
              'L2: Candidates Unwrapped — MUOS-5 (41622)'};
     for k = 1:numel(kinds)
@@ -400,8 +402,7 @@ function test_render_above_freezing_nearest_wrapped_and_unwrapped(tc)
         hv = findobj(V.panel, 'Type', 'constantline');
         verifyNumElements(tc, hv, 1, kinds{k});
         verifyEqual(tc, hv.Value, t(1), kinds{k});
-        verifyEqual(tc, hv.LineWidth, ...
-                    SoopViewerState.ABOVE_FREEZING_NEAREST_LINE_WIDTH, kinds{k});
+        verifyEqual(tc, hv.LineWidth, 8, kinds{k});
         % Behind the data, like the continuous bands: the annotated capture
         % plots at exactly this x position.
         verifyEqual(tc, hv.Layer, 'bottom', kinds{k});

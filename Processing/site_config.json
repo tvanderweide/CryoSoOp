@@ -43,11 +43,15 @@
       "out_dir": "C:\\Users\\edwar\\OneDrive\\Desktop\\CRREL_SoOp\\New_Output"
     }
   },
-  "weather": {
+"weather": {
     "wx_dat": "C:\\Users\\thomasvanderweide\\Documents\\Projects\\CryoSoOp\\Background\\20260608_Brundage_15Min.dat",
     "wx_temp_cols": ["AirTC_Avg", "Temp_C_Avg"],
     "wx_depth_cols": ["SnoDAR_distance_Avg", "SnoDAR_snow_depth_Avg"],
-    "wx_swe_cols": ["SS_SWE_Avg", "SS_SWE_ErrCode_Avg"]
+    "wx_swe_cols": ["SS_SWE_Avg", "SS_SWE_ErrCode_Avg"],
+    "wx_dtc_cols": "DTC_Avg(%d)",
+    "wx_dtc_sensor_spacing_cm": 10.16,
+    "wx_dtc_bottom_height_cm": -25.4,
+    "wx_dtc_order": "top_to_bottom"
   },
   "gating": {
     "toggle": true,

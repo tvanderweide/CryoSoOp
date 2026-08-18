@@ -397,7 +397,8 @@ end
 
 function WX = load_snodar(cfg)
 % Load and clean the Brundage weather station SNOdar data from a Campbell TOA5 file.
-% Returns a table with columns {timestamp (datetime), depth_m, airtc_c, temp_c, swe_mm}.
+% Returns a table with columns {timestamp (datetime), depth_m, airtc_c, temp_c,
+% swe_mm, dtc_c}. dtc_c is rows by sensors in configured cable order, deg C.
 % The two temperature columns (cfg.wx_temp_cols, default AirTC_Avg / Temp_C_Avg)
 % feed the viewer's toggleable SNOdar-overlay temperature lines — or, with the
 % viewer's AboveFreezing box, its orange above-freezing (wet-snow) band layer.
@@ -484,6 +485,16 @@ function WX = load_snodar(cfg)
         swe_col    = find(hdr == string(swe_cols{1}), 1);
         sweerr_col = find(hdr == string(swe_cols{2}), 1);
 
+        % DTC headers are optional. Their configured order is physical cable
+        % order — sensor 1 at cable top, last sensor at cable bottom. The
+        % lowest sensors sit in the soil (negative heights above ground).
+        dtc_names = dtc_column_names(cfg, hdr);
+        dtc_col = zeros(1, numel(dtc_names));
+        for dk = 1:numel(dtc_names)
+            found = find(hdr == string(dtc_names{dk}), 1);
+            if ~isempty(found), dtc_col(dk) = found; end
+        end
+
         % Read all fields as strings — handles quoted timestamps, NAN, unquoted numbers.
         n_cols = numel(hdr);
         fmt    = repmat('%q ', 1, n_cols);
@@ -541,6 +552,15 @@ function WX = load_snodar(cfg)
             end
         end
 
+        dtc_num = nan(n_rows, numel(dtc_names));
+        for dk = 1:numel(dtc_names)
+            if dtc_col(dk) ~= 0
+                v = str2double(strtrim(data(:, dtc_col(dk))));
+                v(~isfinite(v)) = NaN;
+                dtc_num(:, dk) = v;
+            end
+        end
+
         % Calibration drift: flag rows where distance + snow_depth exceeds threshold.
         drift_mask = (dist_num + depth_num) > drift_thr;
         depth_num(drift_mask | ~isfinite(depth_num)) = NaN;
@@ -552,6 +572,7 @@ function WX = load_snodar(cfg)
         airtc_num = airtc_num(keep);
         tempc_num = tempc_num(keep);
         swe_num   = swe_num(keep);
+        dtc_num   = dtc_num(keep, :);
 
         % Weather logger clock -> capture timebase (see header). Brundage logger
         % zone is 'Etc/GMT+7' — POSIX sign convention: Etc/GMT+7 IS UTC-7. An
@@ -592,10 +613,34 @@ function WX = load_snodar(cfg)
         swe_num(abs(swe_num - swe_ref) > swe_spike_thr | ...
                 (isfinite(swe_num) & swe_n < swe_min_support)) = NaN;
 
-        WX = table(ts, depth_num, airtc_num, tempc_num, swe_num, ...
-            'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c', 'swe_mm'});
+        WX = table(ts, depth_num, airtc_num, tempc_num, swe_num, dtc_num, ...
+            'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c', 'swe_mm', 'dtc_c'});
         WX = sortrows(WX, 'timestamp');
     catch ME
         warning('BrundageSoOp:snodar', 'SNOdar load failed: %s', ME.message);
+    end
+end
+
+
+function names = dtc_column_names(cfg, hdr)
+% Resolve DTC headers from a printf-style pattern or an explicit ordered list.
+% Pattern form expands from sensor 1 until a header is absent, so cables with
+% different sensor counts are picked up without a per-site count setting.
+    spec = 'DTC_Avg(%d)';
+    if isfield(cfg, 'wx_dtc_cols') && ~isempty(cfg.wx_dtc_cols)
+        spec = cfg.wx_dtc_cols;
+    end
+    if ~(ischar(spec) || (isstring(spec) && isscalar(spec)))
+        names = cellstr(spec);
+        return;
+    end
+    max_sensor = 200;   % guard against a pattern that matches everything
+    names = {};
+    for k = 1:max_sensor
+        nm = sprintf(char(spec), k);
+        if ~any(hdr == string(nm))
+            break;
+        end
+        names{end+1} = nm; %#ok<AGROW>
     end
 end

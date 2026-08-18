@@ -186,9 +186,9 @@ function test_xregion_yyaxis_layer_and_legend(tc)
     verifyNumElements(tc, lgd.String, 3);
 end
 
-function test_xline_width_and_style_scaling(tc)
-    % Nearest-mode rules remain visibly wider than ordinary plot lines and
-    % participate in the candidates-family Line x scaling contract.
+function test_xline_width_default(tc)
+% Nearest-mode rules use the configured default before the viewer-specific
+% width spinner is applied by the production renderer.
     fig = figure('Visible', 'off');
     cleanup = onCleanup(@() close(fig));
     ax = axes(fig);
@@ -199,9 +199,6 @@ function test_xline_width_and_style_scaling(tc)
     w = SoopViewerState.ABOVE_FREEZING_NEAREST_LINE_WIDTH;
     verifyNumElements(tc, hv, 2);
     verifyEqual(tc, [hv.LineWidth], [w w]);
-    U = tc.TestData.U;
-    U.style_apply(U.style_factors(2, 1), hv, gobjects(0), gobjects(0));
-    verifyEqual(tc, [hv.LineWidth], [2*w 2*w]);
 end
 
 function test_markersize_mutation(tc)

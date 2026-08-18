@@ -23,9 +23,9 @@ function soop_viewer_layout(V)
     % Pixel budget at the 1500 px initial width: 946 fixed + 14x5 spacing
     % + ~450 for the fit checkboxes = ~1466 <= 1484 interior (pinned by the
     % row-1 replica test in viewer_swe_phaseline_test).
-    r1 = uigridlayout(gl, [1 15]);
+    r1 = uigridlayout(gl, [1 16]);
     r1.Layout.Row = 1;
-    r1.ColumnWidth = {250, 120, 36, 105, 22, 105, 80, 80, 64, 84, 'fit', 'fit', 'fit', 'fit', 'fit'};
+    r1.ColumnWidth = {230, 110, 36, 100, 22, 100, 75, 75, 64, 80, 'fit', 'fit', 'fit', 'fit', 'fit', 'fit'};
     r1.ColumnSpacing = 5;
     r1.Padding = [0 0 0 0];
 
@@ -64,6 +64,9 @@ function soop_viewer_layout(V)
     % is > 0 degC, instead of temperature lines (soop_viewer_render_l2).
     S.cb_abvfrz = uicheckbox(r1, 'Text', 'AboveFreezing', 'Value', false, ...
                              'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.cb_snowtemp = uicheckbox(r1, 'Text', 'SnowTemp', 'Value', false, ...
+        'Tooltip', 'DTC snowpack temperature thermograph below the phase plot.', ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
 
     % Row 2 — Dataset (RFI method) + Phase domain selectors + capture selector.
     % The Dataset dropdown switches the active product dir between the base
@@ -142,12 +145,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [31 1]);
-    % Rows 22/23 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [33 1]);
+    % Rows 24/25 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    % The 28 px control rows are children 1-21 (the run of 28s below), so a
+    % The 28 px control rows are children 1-23 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -340,6 +343,42 @@ function soop_viewer_layout(V)
         'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.abvfrz_nearest_row = abvfrz_nearest_row;
     S.abvfrz_nearest_row.Visible = 'off';
+
+    % This is deliberately independent of the generic Line x multiplier: it
+    % controls only the AboveFreezing - Nearest collection-time rules.
+    abvfrz_nearest_width_row = uigridlayout(info_gl, [1 3]);
+    abvfrz_nearest_width_row.ColumnWidth = {'fit', 60, 'fit'};
+    abvfrz_nearest_width_row.Padding = [0 0 0 0];
+    abvfrz_nearest_width_row.ColumnSpacing = 4;
+    uilabel(abvfrz_nearest_width_row, 'Text', 'Nearest width', ...
+            'FontWeight', 'bold');
+    S.sp_abvfrz_nearest_linew = uispinner(abvfrz_nearest_width_row, ...
+        'Limits', [1 20], 'Step', 0.5, ...
+        'Value', S.ABOVE_FREEZING_NEAREST_LINE_WIDTH, ...
+        'ValueDisplayFormat', '%g', ...
+        'Tooltip', ['Width in points of the AboveFreezing - Nearest rules. ' ...
+                    'This is independent of Line ' char(215) '.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    uilabel(abvfrz_nearest_width_row, 'Text', 'pt', 'FontWeight', 'bold');
+    S.abvfrz_nearest_width_row = abvfrz_nearest_width_row;
+    S.abvfrz_nearest_width_row.Visible = 'off';
+
+    % SnowTemp - Nearest modifies the DTC thermograph subplot on the four MUOS
+    % Candidates views: with Daily capture nearest on, the subplot shows one
+    % band per kept capture drawn from that capture's nearest DTC profile
+    % instead of the continuous 15-minute field.
+    snowtemp_nearest_row = uigridlayout(info_gl, [1 1]);
+    snowtemp_nearest_row.Padding = [0 0 0 0];
+    S.cb_snowtemp_nearest = uicheckbox(snowtemp_nearest_row, ...
+        'Text', 'SnowTemp - Nearest', 'Value', false, 'Enable', 'off', ...
+        'Tooltip', sprintf(['With Daily capture nearest and SnowTemp on, the ' ...
+                    'thermograph shows only the DTC profile nearest each kept ' ...
+                    'capture (within %d min), as a band at the capture time. ' ...
+                    'The snow-depth and ground lines stay continuous.'], ...
+                    S.SNOWTEMP_NEAREST_WINDOW_MIN), ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.snowtemp_nearest_row = snowtemp_nearest_row;
+    S.snowtemp_nearest_row.Visible = 'off';
 
     % phaseLine — shown only on the candidates-family views. Governs the
     % phase series' connecting line in EVERY aggregation mode: unchecked =

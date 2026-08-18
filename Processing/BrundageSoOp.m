@@ -79,6 +79,17 @@ end
 if isfield(site.weather, 'wx_swe_cols') && ~isempty(site.weather.wx_swe_cols)
     cfg.wx_swe_cols = reshape(site.weather.wx_swe_cols, 1, []);
 end
+% Digital Temperature Cable configuration. Sensor 1 is cable top and the last
+% sensor is cable bottom; spacing and bottom height are centimeters. The
+% bottom height is negative when the lowest sensors are buried in the soil.
+dtc_fields = {'wx_dtc_cols', 'wx_dtc_sensor_spacing_cm', ...
+              'wx_dtc_bottom_height_cm', 'wx_dtc_order'};
+for dtc_k = 1:numel(dtc_fields)
+    dtc_f = dtc_fields{dtc_k};
+    if isfield(site.weather, dtc_f) && ~isempty(site.weather.(dtc_f))
+        cfg.(dtc_f) = site.weather.(dtc_f);
+    end
+end
 % Set wx_tz when logger timestamps need conversion to cfg.capture_tz.
 % Leave unset to use weather timestamps as recorded.
 if isfield(site.weather, 'wx_tz') && ~isempty(site.weather.wx_tz)

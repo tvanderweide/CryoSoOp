@@ -413,10 +413,8 @@ function [ch0, ch1] = rr_load_capture(V, base)
     % Temporal gating not applied to noise or load
     is_calib = contains(string(base), {'_L_', '_NL_', '_Load_'}, 'IgnoreCase', true);
     if isfield(cfg, 'toggle') && cfg.toggle && ~is_calib
-        fprintf('toggle in viewer')
         [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);   
-        gate_mode = 'quiet';
-        if isfield(cfg, 'gating_mode')
+        if isfield(cfg, 'mode')
             gate_mode = cfg.mode;
         end
 

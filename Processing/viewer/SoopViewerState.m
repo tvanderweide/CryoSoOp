@@ -8,15 +8,23 @@ classdef SoopViewerState < handle
         COMPARE_DATASET  = '__compare_base_notch__';
         CHAINCAL_DATASET = '__notch_chaincal__';
 
-        % Daily AboveFreezing-nearest matching and display constants.
-        % LINE_WIDTH is in points, sized so consecutive warm days abut with
+        % Daily AboveFreezing-nearest matching and display defaults.
+        % LINE_WIDTH is the spinner's initial value in points, sized so
+        % consecutive warm days abut with
         % no gap: a full season across the default 1500 px window leaves
         % roughly 4-5 points per day. Rules share one color, so the slight
         % overlap at narrower spans is invisible; widen this if a hairline
-        % shows on a wider window.
+        % shows on a wider window; users can adjust it per viewer session.
         ABOVE_FREEZING_THRESHOLD_C = 0;
         ABOVE_FREEZING_NEAREST_WINDOW_MIN = 35;
-        ABOVE_FREEZING_NEAREST_LINE_WIDTH = 5;
+        ABOVE_FREEZING_NEAREST_LINE_WIDTH = 6;
+        % SnowTemp - Nearest: match tolerance for pairing a kept capture with a
+        % DTC profile, sized for the station's 15-minute logging cadence. Held
+        % separately from the AboveFreezing window so the two features stay
+        % independent. Band width is in PIXELS (not points) so it needs no DPI
+        % conversion and stays meaningful in headless renders.
+        SNOWTEMP_NEAREST_WINDOW_MIN = 35;
+        SNOWTEMP_NEAREST_BAND_PX = 8;
     end
 
     properties
@@ -91,6 +99,7 @@ classdef SoopViewerState < handle
         cb_airtc
         cb_tempc
         cb_abvfrz
+        cb_snowtemp
         dd_method
         dd_domain
         dd_ctype
@@ -133,6 +142,10 @@ classdef SoopViewerState < handle
         tod_row
         cb_abvfrz_nearest
         abvfrz_nearest_row
+        sp_abvfrz_nearest_linew
+        abvfrz_nearest_width_row
+        cb_snowtemp_nearest
+        snowtemp_nearest_row
         cb_phline
         phline_row
         sp_snrcut

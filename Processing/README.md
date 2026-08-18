@@ -81,7 +81,10 @@ site's copy under another name). Checklist:
      column names behind the viewer's four weather overlays —
      `wx_temp_cols` (two temperatures), `wx_depth_cols` (snow-depth
      distance + depth pair), `wx_swe_cols` (snow-scale SWE value + error
-     code); null/absent keys fall back to the Brundage headers — and
+     code), and DTC settings: `wx_dtc_cols` (header pattern or ordered list),
+     `wx_dtc_sensor_spacing_cm`, `wx_dtc_bottom_height_cm`, and
+     `wx_dtc_order`; null/absent keys fall back to the Brundage headers and
+     cable-spec geometry — and
      `wx_tz` — the logger's clock
      zone (Campbell loggers run fixed standard time year-round; Brundage is
      UTC−7, i.e. `"Etc/GMT+7"` — note the POSIX sign convention: `Etc/GMT+7`
@@ -265,6 +268,21 @@ combined with the side-panel `AboveFreezing - Nearest` option after enabling
 `Daily capture nearest`. With the AirTC series selected, this mode draws thick
 orange rules only at kept collection times whose nearest finite air-temperature
 observation is strictly above 0 °C and no more than 35 minutes away.
+
+`SnowTemp` adds a linked lower Digital Temperature Cable thermograph to those
+four Candidates plots. It colors the snowpack beneath the SNOdar snow surface
+by DTC temperature and leaves air above the surface blank. The sensor above
+the surface brackets the interpolation, so the colored field reaches the
+surface line rather than stopping at the topmost buried sensor. Sensors below
+ground are plotted at negative heights with a ground reference line at 0 cm,
+so the soil profile appears beneath the pack (`wx_dtc_bottom_height_cm`).
+
+The side-panel `SnowTemp - Nearest` option, enabled only while both `Daily
+capture nearest` and `SnowTemp` are on, replaces that continuous field with one
+band per kept capture — drawn at the capture time and colored from its nearest
+DTC profile within ±35 min, matched against the full weather record and only
+among profiles the thermograph can draw. The snow-depth and ground lines stay
+continuous, and the height axis keeps the displayed range's depth extent.
 
 ## Testing
 

@@ -263,6 +263,69 @@ function soop_viewer_render_l2(V, kind)
         show_swe = S.cb_swe.Value   && has_col('swe_mm')  && any(isfinite(TW.swe_mm));
         show_air = S.cb_airtc.Value && has_col('airtc_c') && any(isfinite(TW.airtc_c));
         show_tmp = S.cb_tempc.Value && has_col('temp_c')  && any(isfinite(TW.temp_c));
+        % The request to show a thermograph is a UI question; whether data
+        % exists is a separate one. Keeping them apart means the subplot still
+        % appears (with a reason) when the range-clipped table is empty, and
+        % lets nearest mode match against the FULL weather table.
+        want_snowtemp = S.cb_snowtemp.Value && startsWith(kind, 'L2: Candidates');
+        snowtemp_nearest = want_snowtemp && S.cb_tod.Value && ...
+            S.cb_snowtemp_nearest.Value;
+        show_snowtemp = want_snowtemp;
+        DTC = struct('ok', false, 'why', '', 't', [], 'height_cm', [], ...
+                     'temp_c', [], 'sensor_h', [], 'ground_row', false);
+        SNB = struct('on', snowtemp_nearest, 't_cap', datetime.empty(0, 1), ...
+                     'cols', {{}}, 'height_cm', []);
+        if want_snowtemp && ~snowtemp_nearest
+            if ~(has_col('dtc_c') && has_col('depth_m'))
+                DTC.why = 'No weather records with DTC and snow depth in this date range.';
+            else
+                DTC = V.U.dtc_thermograph(tcol(TW), TW.depth_m, TW.dtc_c, V.cfg);
+            end
+        elseif snowtemp_nearest
+            % Nearest mode: match kept captures against the full weather table
+            % so a capture just outside the range still finds its observation,
+            % and only among profiles that are actually renderable.
+            % Schema and emptiness are distinct failures: a typed but empty
+            % table has the columns and still cannot supply a profile.
+            wx_names = {};
+            if istable(S.WX), wx_names = S.WX.Properties.VariableNames; end
+            wx_schema_ok = all(ismember({'dtc_c', 'depth_m'}, wx_names));
+            if ~wx_schema_ok
+                DTC.why = 'Weather table has no DTC or snow-depth columns.';
+            elseif height(S.WX) == 0
+                DTC.why = 'Weather table is empty — no DTC profiles to match.';
+            else
+                rok = V.U.dtc_renderable(S.WX.depth_m, S.WX.dtc_c, V.cfg);
+                if ~any(rok)
+                    DTC.why = 'No renderable DTC snow-temperature profiles in the weather record.';
+                else
+                    t_cap = tcol(TC);
+                    wxi = V.U.nearest_wx_idx(t_cap, tcol(S.WX), rok, ...
+                        minutes(S.SNOWTEMP_NEAREST_WINDOW_MIN));
+                    hit = wxi > 0;
+                    if ~any(hit)
+                        DTC.why = sprintf( ...
+                            'No kept capture has a DTC profile within %d min.', ...
+                            S.SNOWTEMP_NEAREST_WINDOW_MIN);
+                    else
+                        % One band per kept capture (no dedup — two captures may
+                        % legitimately share the closest observation), shaped one
+                        % row at a time so masking/bracketing is identical to the
+                        % continuous field. Bands sit at CAPTURE times.
+                        SNB = V.U.snowtemp_nearest_bands( ...
+                            t_cap(hit), wxi(hit), S.WX, V.cfg);
+                        if isempty(SNB.cols)
+                            DTC.why = 'Matched DTC profiles could not be shaped.';
+                        else
+                            SNB.on = true;
+                            DTC.ok = true;
+                            DTC.height_cm = SNB.height_cm;
+                            DTC.ground_row = SNB.ground_row;
+                        end
+                    end
+                end
+            end
+        end
         % AboveFreezing swaps the ticked temperature LINES for one orange
         % indicator layer — no temperature ruler axes then.
         abvfrz = S.cb_abvfrz.Value;
@@ -288,6 +351,15 @@ function soop_viewer_render_l2(V, kind)
         % and the manual hour-colorbar strip.
         P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, hour_on);
         ax_pos = P.ax_pos;
+        if show_snowtemp
+            if hour_on
+                ax_pos = [ax_pos(1) 0.45 ax_pos(3) 0.48];
+                dtc_pos = [ax_pos(1) 0.19 ax_pos(3) 0.18];
+            else
+                ax_pos = [ax_pos(1) 0.43 ax_pos(3) 0.50];
+                dtc_pos = [ax_pos(1) 0.13 ax_pos(3) 0.22];
+            end
+        end
         ax  = axes(S.panel, 'Position', ax_pos);
         hold(ax, 'on');   % depth + legend proxies share ax's right side
         leg = {};  lh = gobjects(0);   % legend labels + handles, built as drawn
@@ -392,9 +464,11 @@ function soop_viewer_render_l2(V, kind)
                     % capture plots at exactly the rule's x position.
                     hv = xline(ax, t_TC(warm), '-', ...
                                'Color', [1.0 0.55 0.10], ...
-                               'LineWidth', S.ABOVE_FREEZING_NEAREST_LINE_WIDTH, ...
+                               'LineWidth', S.sp_abvfrz_nearest_linew.Value, ...
                                'Layer', 'bottom');
-                    st_lines = [st_lines, reshape(hv, 1, [])];
+                    % Deliberately outside st_lines: the dedicated Nearest
+                    % width spinner, rather than the generic Line x style
+                    % multiplier, owns these collection-time rule widths.
                     lh(end+1) = hv(1);
                     leg{end+1} = sprintf('Air Temp > %g%cC (nearest)', ...
                         S.ABOVE_FREEZING_THRESHOLD_C, char(176));
@@ -585,6 +659,84 @@ function soop_viewer_render_l2(V, kind)
         legend(lh, leg, 'Location', 'best');
         grid(ax, 'on');
         xlabel(ax, 'Date');
+        if show_snowtemp
+            ax.XTickLabel = [];
+            axD = axes(S.panel, 'Position', dtc_pos);
+            if DTC.ok
+                hold(axD, 'on');
+                if SNB.on
+                    % One two-column surface per profile. Separate objects (not
+                    % one surface with NaN separators) mean no face can bridge
+                    % between days regardless of renderer, and a single matched
+                    % profile still produces one face. Width is in pixels, so
+                    % bands stay visible on a season-long axis.
+                    try
+                        pp = getpixelposition(axD, true);
+                        ax_px = pp(3);
+                    catch
+                        ax_px = 0;   % band_halfwidth falls back on a bad width
+                    end
+                    half = V.U.band_halfwidth(t0, t1, ax_px, ...
+                        S.SNOWTEMP_NEAREST_BAND_PX);
+                    for bk = 1:numel(SNB.cols)
+                        c = SNB.cols{bk};
+                        cd = [c.temp_c, c.temp_c];
+                        surface(axD, [c.t - half, c.t + half], c.height_cm, ...
+                            zeros(size(cd)), cd, ...
+                            'EdgeColor', 'none', 'FaceColor', 'interp');
+                    end
+                else
+                    % Flat ZData with temperature as CData: the field is drawn in
+                    % the z=0 plane so the snow-surface and ground lines above it
+                    % are never occluded by warm (z>0) parts of the pack.
+                    surface(axD, DTC.t, DTC.height_cm, ...
+                        zeros(size(DTC.temp_c)), DTC.temp_c, ...
+                        'EdgeColor', 'none', 'FaceColor', 'interp');
+                end
+                plot(axD, tcol(TW), 100 * TW.depth_m, 'k-', 'LineWidth', 1);
+                if DTC.ground_row
+                    % Ground surface separates the snowpack from the buried
+                    % soil sensors plotted at negative heights.
+                    yline(axD, 0, '-', 'Color', [0.35 0.20 0.05], ...
+                          'LineWidth', 1.2, 'Layer', 'top');
+                end
+                colormap(axD, dtc_colormap());
+                clim(axD, [-12 1]);
+                cbD = colorbar(axD, 'eastoutside');
+                cbD.Label.String = 'Snow temperature [\circC]';
+                cbD.Position = [dtc_pos(1) + dtc_pos(3) + 0.015, ...
+                                dtc_pos(2), 0.015, dtc_pos(4)];
+                axD.Position = dtc_pos;
+                ylabel(axD, 'Height Above Ground [cm]');
+                % Upper limit follows the DISPLAYED RANGE's depth extent, not
+                % just the drawn profiles, so the scale does not jump when the
+                % Nearest modifier is toggled. Extended if a matched profile
+                % sits above it (a capture matched just outside the range).
+                y_hi = max(DTC.height_cm);
+                if has_col('depth_m')
+                    d_rng = 100 * TW.depth_m(isfinite(TW.depth_m));
+                    if ~isempty(d_rng)
+                        y_hi = max(y_hi, max(d_rng));
+                    end
+                end
+                ylim(axD, [min(DTC.height_cm) y_hi]);
+                grid(axD, 'on');
+            else
+                % Anchor a datetime x-ruler before the message: nothing
+                % datetime-valued is drawn on this path, so the axes would
+                % otherwise keep a numeric ruler and reject the datetime xlim
+                % below. Invisible and NaN-valued, so it adds no marks.
+                plot(axD, [t0 t1], [NaN NaN], 'LineStyle', 'none');
+                text(axD, 0.5, 0.5, ['SnowTemp unavailable: ' DTC.why], ...
+                    'Units', 'normalized', 'HorizontalAlignment', 'center', ...
+                    'Interpreter', 'none');
+                ylabel(axD, 'Height Above Ground [cm]');
+                ylim(axD, [0 1]);
+            end
+            xlim(axD, [t0 t1]);
+            xlabel(axD, 'Date');
+            linkaxes([ax axD], 'x');
+        end
         S.last_n = height(TC);
         return;
     end
@@ -622,4 +774,12 @@ function soop_viewer_render_l2(V, kind)
             title(ax, 'Satellite azimuth at capture times');
     end
     grid(ax, 'on');
+end
+
+
+function cmap = dtc_colormap()
+% Cold snow maps blue and near-zero wet/ripe snow maps red.
+    anchors = [0.08 0.20 0.70; 0.20 0.70 0.90; 0.98 0.92 0.55; 0.80 0.08 0.08];
+    cmap = interp1(linspace(0, 1, size(anchors, 1)), anchors, ...
+                   linspace(0, 1, 256));
 end

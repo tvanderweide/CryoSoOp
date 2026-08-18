@@ -107,6 +107,16 @@ Quick check (drives the RF switch — bench only): `bbb_set_state.sh Signal && e
 means the pin state was set **and read back verified** on the BBB; nonzero (bad write, state
 mismatch, unreachable BBB) makes the run abort via `on_cmd_fail: abort`.
 
+Each call normalises the pins itself — export, clear an armed `edge`, `direction=out` — so a BBB
+whose GPIOs come up exported and armed as interrupt sources (which blocks the `direction` write and
+would abort the run) needs no manual preparation. Every attribute is read before it is written and
+written only when it differs, so a repeat call, or a state the switch already holds, drives no
+transition. The read-back check is of the **logical** sysfs value: it confirms the physical switch
+state only while `active_low=0` on every pin, which the per-state value tables assume.
+
+Offline tests for the helper (argument mapping, pin normalisation, failure paths) run without a
+BBB: `sh tests/test_bbb_set_state.sh`.
+
 ## Verify the binary before first use
 
 Run these after every fresh build, before trusting the system for a real collection:
@@ -273,6 +283,11 @@ deployment's hardware, network, and storage lives in **one file: `config/site.en
    then install the helper where the YAML hooks expect it:
    `sudo install -m 0755 orchestration/bbb_set_state.sh /usr/local/bin/bbb_set_state.sh`.
    For bench use without the wrapper: `set -a; . config/site.env; set +a; bbb_set_state.sh NL`.
+   A daily BBB reboot in the **BBB's root** crontab (e.g. `50 23 * * * /sbin/reboot`) is
+   recommended as a recovery mitigation for an unresponsive BeagleBone — it is not needed for GPIO
+   setup, which the helper handles on every call. Schedule it clear of the capture windows, and
+   confirm both hosts are NTP-synced (`timedatectl show-timesync`) so the two crontabs stay in the
+   intended order.
 4. **Crontab** — install the cron entry for `radiometer_run.sh` on the new machine (see the
    script header for the reference line). The wrapper sources `site.env` itself, so the cron
    line needs no env prefixes.
