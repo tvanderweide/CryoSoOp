@@ -362,7 +362,8 @@ function soop_viewer_render_l2(V, kind)
         soil_on = S.cb_soilvwc.Value && show_snowtemp && ...
                   V.U.soil_usable(S.WX, V.cfg) && has_col('soil_vwc') && ...
                   any(isfinite(TW.soil_vwc(:)));
-        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, color_on, soil_on);
+        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, color_on, ...
+                             soil_on, show_snowtemp);
         ax_pos = P.ax_pos;
         if show_snowtemp
             if color_on

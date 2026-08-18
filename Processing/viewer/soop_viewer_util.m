@@ -1022,7 +1022,8 @@ function R = wx_axis_cfg(series, vals)
 end
 
 
-function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on, soil_on)
+function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on, soil_on, ...
+                          snowtemp_on)
 % Deterministic axes/colorbar geometry + right-ruler ownership for the
 % candidates figure (normalized panel units; the render never reads live
 % Position values):
@@ -1042,6 +1043,13 @@ function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on, soil_on)
 %              x-aligned instead of the ruler overrunning the panel edge
 %   .dtc_cb_gap — gap from the SnowTemp axes right edge to its temperature
 %              colorbar, widened to clear the soil ruler when soil_on
+%
+% snowtemp_on reserves the right margin for the SnowTemp colorbar ASSEMBLY —
+% strip plus its tick labels plus its rotated axis label, which are drawn
+% outside the strip and are otherwise clipped at the panel edge. Reserving it
+% narrows BOTH stacked axes together: they are linkaxes'd on x, so unequal
+% widths would map the same date to different horizontal positions and make
+% the phase trace unreadable against the thermograph below it.
     P.swe_ovl = show_dep && show_swe;
     if show_dep
         P.right = 'depth';
@@ -1051,9 +1059,13 @@ function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on, soil_on)
         P.right = 'none';
     end
     if nargin < 5, soil_on = false; end
+    if nargin < 6, snowtemp_on = false; end
     SLOT_W = 0.06;   % per-ruler right-margin slot (spine-to-spine gap)
+    % SnowTemp colorbar assembly: gap + strip + tick labels + rotated label.
+    CB_W = 0.10;
     axW = 0.86 - 2 * SLOT_W * ...
-          (double(P.swe_ovl) + double(want_temp) + double(soil_on));
+          (double(P.swe_ovl) + double(want_temp) + double(soil_on)) ...
+          - CB_W * double(snowtemp_on);
     if hour_on
         P.ax_pos = [0.09 0.25 axW 0.68];
         P.cb_pos = [0.09 0.11 axW 0.04];

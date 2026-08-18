@@ -324,9 +324,18 @@ function test_wx_axes_plan_no_combination_overflows(tc)
         for tmp = [false true]
           for hr = [false true]
             for soil = [false true]
-                P = U.wx_axes_plan(dep, swe, tmp, hr, soil);
-                lbl = sprintf('dep=%d swe=%d tmp=%d hour=%d soil=%d', ...
-                              dep, swe, tmp, hr, soil);
+              for snowt = [false true]
+                P = U.wx_axes_plan(dep, swe, tmp, hr, soil, snowt);
+                lbl = sprintf(['dep=%d swe=%d tmp=%d hour=%d soil=%d ' ...
+                               'snowtemp=%d'], dep, swe, tmp, hr, soil, snowt);
+                % SnowTemp draws a colorbar whose tick labels and rotated axis
+                % label sit OUTSIDE the strip; the plan must leave room for the
+                % whole assembly or the label clips at the panel edge.
+                if snowt
+                    strip_right = P.ax_pos(1) + P.ax_pos(3) + P.dtc_cb_gap + 0.015;
+                    verifyLessThanOrEqual(tc, strip_right, 0.9, ...
+                        ['colorbar assembly needs label room: ' lbl]);
+                end
                 verifyGreaterThan(tc, P.ax_pos(3), 0, lbl);
                 verifyLessThanOrEqual(tc, P.ax_pos(1) + P.ax_pos(3), 1, lbl);
 
@@ -357,11 +366,37 @@ function test_wx_axes_plan_no_combination_overflows(tc)
                     verifyLessThanOrEqual(tc, P.cb_pos(1) + P.cb_pos(3), 1, lbl);
                     verifyGreaterThan(tc, P.ax_pos(2), P.cb_pos(2), lbl);
                 end
+              end
             end
           end
         end
       end
     end
+end
+
+function test_snowtemp_reserves_room_for_its_colorbar_label(tc)
+    % The SnowTemp colorbar's tick labels and rotated axis label are drawn
+    % OUTSIDE the strip. Without a reservation the strip ends at 0.98 and the
+    % label runs past the panel edge, clipping in both the viewer and the
+    % exported PNG. The reservation comes out of the shared width budget so
+    % both stacked axes narrow together and stay x-aligned.
+    U = tc.TestData.U;
+
+    P_off = U.wx_axes_plan(false, true, false, false, false, false);
+    P_on  = U.wx_axes_plan(false, true, false, false, false, true);
+    verifyLessThan(tc, P_on.ax_pos(3), P_off.ax_pos(3), ...
+        'SnowTemp must claim right margin from the axes width');
+    verifyEqual(tc, P_on.ax_pos(1), P_off.ax_pos(1), ...
+        'left edge is unchanged — the claim is on the right');
+
+    % Strip end plus a realistic label allowance stays inside the panel.
+    strip_right = P_on.ax_pos(1) + P_on.ax_pos(3) + P_on.dtc_cb_gap + 0.015;
+    verifyLessThanOrEqual(tc, strip_right + 0.09, 1, ...
+        'ticks + rotated label must fit between the strip and the panel edge');
+
+    % Default 4-argument callers are unaffected (no SnowTemp subplot).
+    verifyEqual(tc, U.wx_axes_plan(false, true, false, false).ax_pos, ...
+                P_off.ax_pos, 'AbsTol', 1e-12);
 end
 
 function test_overlay_colorbar_alignment(tc)
