@@ -724,7 +724,9 @@ function soop_viewer_render_l2(V, kind)
         xlabel(ax, 'Date');
         if show_snowtemp
             ax.XTickLabel = [];
-            axD = axes(S.panel, 'Position', dtc_pos);
+            % Tagged so tests and export code can find the thermograph without
+            % guessing at axes order.
+            axD = axes(S.panel, 'Position', dtc_pos, 'Tag', 'soop_dtc');
             if DTC.ok
                 hold(axD, 'on');
                 if SNB.on
@@ -764,7 +766,12 @@ function soop_viewer_render_l2(V, kind)
                           'LineWidth', 1.2, 'Layer', 'top');
                 end
                 colormap(axD, dtc_colormap());
-                clim(axD, [-12 1]);
+                % Side-panel color-scale bounds. dtc_colormap() has no built-in
+                % anchor at 0 C, so where freezing lands on the ramp follows
+                % these limits: the default top just above 0 C is what puts
+                % melting-point snow at the red end.
+                clim(axD, V.U.dtc_clim(S.sp_dtc_lo.Value, S.sp_dtc_hi.Value, ...
+                                       S.DTC_CLIM_DEFAULT_C));
                 cbD = colorbar(axD, 'eastoutside');
                 cbD.Label.String = 'Snow temperature [\circC]';
                 % Gap widens to clear the soil-moisture ruler when that overlay

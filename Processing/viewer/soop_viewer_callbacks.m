@@ -18,7 +18,22 @@ function C = soop_viewer_callbacks()
     C.on_gap_field = @on_gap_field;
     C.on_fringe_edit = @on_fringe_edit;
     C.on_pointcolor = @on_pointcolor;
+    C.on_dtc_clim = @on_dtc_clim;
     C.set_family_rows = @set_family_rows;
+end
+
+
+function on_dtc_clim(V, which)
+% Keep the SnowTemp color-scale spinners ordered low < high by pushing the
+% PARTNER of whichever one the user just moved, so an inverted pair never
+% reaches the render and the edit the user made is the one that survives.
+% Both spinners share the DTC_CLIM_RANGE_C travel, so a nudge can saturate;
+% when it does, the moved spinner gives way instead, leaving a valid pair.
+    cl = V.U.dtc_clim_order(V.sp_dtc_lo.Value, V.sp_dtc_hi.Value, which, ...
+                            V.DTC_CLIM_RANGE_C, V.sp_dtc_hi.Step);
+    V.sp_dtc_lo.Value = cl(1);
+    V.sp_dtc_hi.Value = cl(2);
+    V.CB.refresh(V);
 end
 
 
@@ -52,7 +67,8 @@ function set_family_rows(V, is_cand, is_candidate_plot)
          S.fringe_row, S.hour_row, S.snrcolor_row, S.style_row], 'Visible', on);
     nearest_on = matlab.lang.OnOffSwitchState(is_candidate_plot);
     set([S.abvfrz_nearest_row, S.abvfrz_nearest_width_row, ...
-         S.snowtemp_nearest_row, S.soilvwc_row], 'Visible', nearest_on);
+         S.snowtemp_nearest_row, S.soilvwc_row, S.dtc_clim_row], ...
+         'Visible', nearest_on);
     S.cb_abvfrz_nearest.Enable = ...
         matlab.lang.OnOffSwitchState(is_candidate_plot && S.cb_tod.Value);
     % Needs both prerequisites: the daily filter defines "nearest", and there
@@ -64,6 +80,12 @@ function set_family_rows(V, is_cand, is_candidate_plot)
     % plus configured rod geometry and a matching soil_vwc column to draw from.
     S.cb_soilvwc.Enable = matlab.lang.OnOffSwitchState( ...
         is_candidate_plot && S.cb_snowtemp.Value && V.U.soil_usable(S.WX, V.cfg));
+    % The color scale belongs to the thermograph, so it is only adjustable
+    % while that subplot is drawn.
+    dtc_clim_on = matlab.lang.OnOffSwitchState( ...
+        is_candidate_plot && S.cb_snowtemp.Value);
+    S.sp_dtc_lo.Enable = dtc_clim_on;
+    S.sp_dtc_hi.Enable = dtc_clim_on;
 end
 
 

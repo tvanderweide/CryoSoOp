@@ -280,6 +280,17 @@ DTC profile within ±35 min, matched against the full weather record and only
 among profiles the thermograph can draw. The snow-depth and ground lines stay
 continuous, and the height axis keeps the displayed range's depth extent.
 
+The side-panel `SnowTemp scale` spinners set the thermograph colorbar's lower
+and upper bounds in °C (default −12 to 1, spinner travel −40 to 20). They are
+enabled whenever `SnowTemp` is on and apply to both the continuous field and
+the `SnowTemp - Nearest` bands. The pair is held ordered automatically: moving
+one past the other pushes its partner rather than accepting an inverted range.
+
+Note that the DTC colormap is a sequential blue → cyan → pale-yellow → red ramp
+with **no built-in anchor at 0 °C** — the default top of 1 °C is what places
+melting-point snow at the red end. Raising the top moves 0 °C down the ramp, so
+that visual cue weakens; widen the top deliberately, not by habit.
+
 The side-panel `SnowTemp - SoilMoisture` option, enabled only while `SnowTemp`
 is on and the site configures SoilVUE rod geometry (`wx_soil_vwc_cols`,
 `wx_soil_rod_cm`, `wx_soil_surface_rod_cm`), overlays volumetric water content

@@ -25,6 +25,18 @@ classdef SoopViewerState < handle
         % conversion and stays meaningful in headless renders.
         SNOWTEMP_NEAREST_WINDOW_MIN = 35;
         SNOWTEMP_NEAREST_BAND_PX = 8;
+        % SnowTemp thermograph color limits in DEGREES C, [low high], used as
+        % the spinner defaults and as the fallback whenever the pair is
+        % invalid. The top sits just above 0 C so isothermal, melting-point
+        % snow lands at the colormap's red end: dtc_colormap() is a sequential
+        % blue -> cyan -> pale-yellow -> red ramp with no built-in anchor at
+        % 0 C, so that reading is a property of THESE limits, not of the
+        % colormap. Widening the top pushes 0 C down the ramp and weakens the
+        % cue.
+        DTC_CLIM_DEFAULT_C = [-12 1];
+        % Spinner travel, wide enough for any seasonal snowpack while keeping
+        % the pair physically meaningful.
+        DTC_CLIM_RANGE_C = [-40 20];
     end
 
     properties
@@ -148,6 +160,9 @@ classdef SoopViewerState < handle
         snowtemp_nearest_row
         cb_soilvwc
         soilvwc_row
+        sp_dtc_lo
+        sp_dtc_hi
+        dtc_clim_row
         cb_phline
         phline_row
         sp_snrcut

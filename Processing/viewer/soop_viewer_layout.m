@@ -145,12 +145,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [35 1]);
-    % Rows 26/27 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [36 1]);
+    % Rows 27/28 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    % The 28 px control rows are children 1-25 (the run of 28s below), so a
+    % The 28 px control rows are children 1-26 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -396,6 +396,35 @@ function soop_viewer_layout(V)
         'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.soilvwc_row = soilvwc_row;
     S.soilvwc_row.Visible = 'off';
+
+    % SnowTemp color-scale bounds in degrees C. Both spinners share one row and
+    % one handler, which keeps low < high by nudging its partner rather than
+    % letting an inverted pair reach the render.
+    dtc_clim_row = uigridlayout(info_gl, [1 5]);
+    dtc_clim_row.ColumnWidth   = {'fit', 62, 'fit', 62, 'fit'};
+    dtc_clim_row.Padding       = [0 0 0 0];
+    dtc_clim_row.ColumnSpacing = 4;
+    uilabel(dtc_clim_row, 'Text', 'SnowTemp scale', 'FontWeight', 'bold');
+    dtc_tip = ['Color limits for the SnowTemp thermograph, in ' char(176) 'C. ' ...
+               'The default top sits just above 0 ' char(176) 'C so ' ...
+               'melting-point snow reads at the colormap''s red end — that ' ...
+               'cue comes from the LIMITS, not the colormap, so raising the ' ...
+               'top moves 0 ' char(176) 'C down the ramp. Low is held below ' ...
+               'high automatically.'];
+    S.sp_dtc_lo = uispinner(dtc_clim_row, ...
+        'Limits', S.DTC_CLIM_RANGE_C, 'Step', 1, ...
+        'Value', S.DTC_CLIM_DEFAULT_C(1), 'ValueDisplayFormat', '%g', ...
+        'Tooltip', dtc_tip, ...
+        'ValueChangedFcn', @(~,~) V.CB.on_dtc_clim(V, 'lo'));
+    uilabel(dtc_clim_row, 'Text', 'to', 'FontWeight', 'bold');
+    S.sp_dtc_hi = uispinner(dtc_clim_row, ...
+        'Limits', S.DTC_CLIM_RANGE_C, 'Step', 1, ...
+        'Value', S.DTC_CLIM_DEFAULT_C(2), 'ValueDisplayFormat', '%g', ...
+        'Tooltip', dtc_tip, ...
+        'ValueChangedFcn', @(~,~) V.CB.on_dtc_clim(V, 'hi'));
+    uilabel(dtc_clim_row, 'Text', [char(176) 'C'], 'FontWeight', 'bold');
+    S.dtc_clim_row = dtc_clim_row;
+    S.dtc_clim_row.Visible = 'off';
 
     % phaseLine — shown only on the candidates-family views. Governs the
     % phase series' connecting line in EVERY aggregation mode: unchecked =

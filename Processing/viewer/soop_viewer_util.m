@@ -54,6 +54,8 @@ function U = soop_viewer_util()
     U.soil_usable = @soil_usable;
     U.soil_color = @soil_color;
     U.soil_linestyle = @soil_linestyle;
+    U.dtc_clim = @dtc_clim;
+    U.dtc_clim_order = @dtc_clim_order;
     U.nearest_wx_idx = @nearest_wx_idx;
     U.band_halfwidth = @band_halfwidth;
     U.snowtemp_nearest_bands = @snowtemp_nearest_bands;
@@ -1625,6 +1627,43 @@ function c = soil_color(k)
         return;
     end
     c = ramp(mod(round(k) - 1, size(ramp, 1)) + 1, :);
+end
+
+
+function cl = dtc_clim_order(lo, hi, moved, span, step)
+% Restore low < high for the SnowTemp color-scale spinners after one of them
+% moved, returning the corrected [low high]. The spinner named by `moved`
+% ('lo' or 'hi') keeps its value and its PARTNER gives way, so the edit the
+% user just made survives. Both share the same travel, so the nudge can
+% saturate; when it does, the moved spinner yields instead, which always
+% leaves an ordered pair inside span.
+    lo = double(lo);  hi = double(hi);
+    if hi > lo
+        cl = [lo hi];
+        return;
+    end
+    if strcmp(moved, 'lo')
+        hi = min(span(2), lo + step);
+        if hi <= lo, lo = hi - step; end
+    else
+        lo = max(span(1), hi - step);
+        if lo >= hi, hi = lo + step; end
+    end
+    cl = [lo hi];
+end
+
+
+function cl = dtc_clim(lo, hi, default_cl)
+% Validated SnowTemp thermograph color limits in degrees C, [low high].
+% The spinner handler already keeps the pair ordered, so this is the render's
+% own re-check: any non-real, nonfinite, non-scalar, or non-ascending pair
+% falls back to default_cl rather than reaching clim(), which errors on a
+% non-increasing range and would take the whole figure down with it.
+    cl = default_cl;
+    ok = @(v) isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v);
+    if ok(lo) && ok(hi) && double(hi) > double(lo)
+        cl = [double(lo) double(hi)];
+    end
 end
 
 

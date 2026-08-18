@@ -164,6 +164,166 @@ function test_snowtemp_render_creates_linked_lower_axes(tc)
 end
 
 
+% ============================================ SnowTemp: color-scale bounds
+
+function test_dtc_clim_validates_and_falls_back(tc)
+% clim() errors on a non-increasing range, so the render's own re-check must
+% reject any pair it could not use rather than pass it through.
+    U   = soop_viewer_util();
+    def = [-12 1];
+
+    verifyEqual(tc, U.dtc_clim(-20, 5, def), [-20 5]);
+    verifyEqual(tc, U.dtc_clim(-12.5, 0.5, def), [-12.5 0.5]);   % fractional
+    verifyEqual(tc, U.dtc_clim(int8(-5), 2, def), [-5 2]);       % integer type
+
+    verifyEqual(tc, U.dtc_clim(5, -5, def), def);                % inverted
+    verifyEqual(tc, U.dtc_clim(3, 3, def), def);                 % zero span
+    verifyEqual(tc, U.dtc_clim(NaN, 1, def), def);
+    verifyEqual(tc, U.dtc_clim(-12, Inf, def), def);
+    verifyEqual(tc, U.dtc_clim([], 1, def), def);
+    verifyEqual(tc, U.dtc_clim([-12 -6], 1, def), def);          % non-scalar
+    verifyEqual(tc, U.dtc_clim('a', 1, def), def);
+    verifyEqual(tc, U.dtc_clim(-12 + 1i, 1, def), def);          % complex
+end
+
+
+function test_dtc_clim_spinners_stay_ordered(tc)
+% The ordering rule pushes the PARTNER of whichever spinner moved, so the edit
+% the user just made survives and an inverted pair never reaches the render.
+    U    = soop_viewer_util();
+    span = [-40 20];
+    step = 1;
+    ord  = @(lo, hi, which) U.dtc_clim_order(lo, hi, which, span, step);
+
+    % Already ordered: untouched.
+    verifyEqual(tc, ord(-12, 1, 'lo'), [-12 1]);
+    verifyEqual(tc, ord(-12, 1, 'hi'), [-12 1]);
+
+    % Low pushed above high: low keeps the user's value, high gives way.
+    cl = ord(6, 1, 'lo');
+    verifyEqual(tc, cl(1), 6);
+    verifyGreaterThan(tc, cl(2), cl(1));
+
+    % High pulled below low: high keeps the user's value, low gives way.
+    cl = ord(-12, -30, 'hi');
+    verifyEqual(tc, cl(2), -30);
+    verifyLessThan(tc, cl(1), cl(2));
+
+    % Equal values are also invalid (clim needs a nonzero span).
+    cl = ord(0, 0, 'lo');
+    verifyLessThan(tc, cl(1), cl(2));
+
+    % Saturating at the travel limit still leaves an ordered pair inside span:
+    % the moved spinner yields when its partner has nowhere left to go.
+    cl = ord(span(2), 0, 'lo');
+    verifyLessThan(tc, cl(1), cl(2));
+    verifyLessThanOrEqual(tc, cl(2), span(2));
+
+    cl = ord(0, span(1), 'hi');
+    verifyLessThan(tc, cl(1), cl(2));
+    verifyGreaterThanOrEqual(tc, cl(1), span(1));
+end
+
+
+function test_dtc_clim_spinner_defaults(tc)
+% The row ships at the documented defaults over the documented travel.
+    cfg = minimal_cfg();
+    V = build_viewer(cfg);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    verifyEqual(tc, V.sp_dtc_lo.Value, V.DTC_CLIM_DEFAULT_C(1));
+    verifyEqual(tc, V.sp_dtc_hi.Value, V.DTC_CLIM_DEFAULT_C(2));
+    verifyEqual(tc, V.sp_dtc_lo.Limits, V.DTC_CLIM_RANGE_C);
+    verifyEqual(tc, V.sp_dtc_hi.Limits, V.DTC_CLIM_RANGE_C);
+end
+
+
+function test_dtc_clim_row_visibility_and_gating(tc)
+% Visible with the candidates family, adjustable only while the thermograph it
+% scales is actually drawn.
+    cfg = minimal_cfg();
+    V = build_viewer(cfg);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    verifyFalse(tc, logical(V.dtc_clim_row.Visible));
+    V.cb_snowtemp.Value = false;
+    V.CB.set_family_rows(V, true, true);
+    verifyTrue(tc, logical(V.dtc_clim_row.Visible));
+    verifyFalse(tc, logical(V.sp_dtc_lo.Enable));
+    verifyFalse(tc, logical(V.sp_dtc_hi.Enable));
+
+    V.cb_snowtemp.Value = true;
+    V.CB.set_family_rows(V, true, true);
+    verifyTrue(tc, logical(V.sp_dtc_lo.Enable));
+    verifyTrue(tc, logical(V.sp_dtc_hi.Enable));
+
+    % Off the candidates family the row hides again.
+    V.CB.set_family_rows(V, true, false);
+    verifyFalse(tc, logical(V.dtc_clim_row.Visible));
+end
+
+
+function test_dtc_clim_reaches_the_rendered_colorbar(tc)
+% The spinner values must land on the thermograph axes in BOTH SnowTemp modes,
+% since the continuous field and the Nearest bands share one color scale.
+    % Continuous mode.
+    cfg = minimal_cfg();
+    V = build_viewer(cfg);
+    c1 = onCleanup(@() delete(V.fig));
+    t = datetime(2026, 1, 1) + minutes(15 * (0:3)');
+    V.CAND = table(t, "cap" + string((1:4)'), 20 * ones(4, 1), (10:10:40)', ...
+        'VariableNames', {'timestamp', 'base_name', 'snr_db', 'corr_41622'});
+    V.WX = table(t, 0.25 * ones(4, 1), repmat([-8 -6 -3 0], 4, 1), ...
+        'VariableNames', {'timestamp', 'depth_m', 'dtc_c'});
+    V.dp1.Value = t(1);  V.dp2.Value = t(end);
+    V.cb_snowtemp.Value = true;
+    V.sp_dtc_lo.Value = -25;  V.sp_dtc_hi.Value = 3;
+    soop_viewer_render_l2(V, 'L2: Candidates — MUOS-5 (41622)');
+    verifyEqual(tc, tagged_dtc(tc, V).CLim, [-25 3], 'AbsTol', 1e-12);
+
+    % Nearest mode shares the same scale.
+    V2 = nearest_fixture();
+    c2 = onCleanup(@() delete(V2.fig));
+    V2.sp_dtc_lo.Value = -25;  V2.sp_dtc_hi.Value = 3;
+    soop_viewer_render_l2(V2, 'L2: Candidates — MUOS-5 (41622)');
+    verifyEqual(tc, tagged_dtc(tc, V2).CLim, [-25 3], 'AbsTol', 1e-12);
+end
+
+
+function test_dtc_clim_invalid_pair_falls_back_at_render(tc)
+% If anything sets an inverted pair behind the spinners' back, the render's own
+% re-check substitutes the defaults instead of letting clim() error out and
+% take the whole figure down.
+    V = nearest_fixture();
+    cleanup = onCleanup(@() delete(V.fig));
+    V.sp_dtc_lo.Value = 5;
+    V.sp_dtc_hi.Value = -5;      % set directly, bypassing on_dtc_clim
+    soop_viewer_render_l2(V, 'L2: Candidates — MUOS-5 (41622)');
+    verifyEqual(tc, tagged_dtc(tc, V).CLim, V.DTC_CLIM_DEFAULT_C, 'AbsTol', 1e-12);
+end
+
+
+function axD = tagged_dtc(tc, V)
+    axD = findobj(V.panel, 'Type', 'axes', 'Tag', 'soop_dtc');
+    verifyNumElements(tc, axD, 1, 'tagged thermograph axes must exist');
+end
+
+
+function test_dtc_clim_default_places_freezing_at_the_ramp_top(tc)
+% The "melting-point snow reads red" cue is a property of the DEFAULT LIMITS,
+% not of dtc_colormap(), which carries no anchor at 0 C. This pins the default
+% so the cue cannot drift silently; changing it is a deliberate edit here too.
+    cfg = minimal_cfg();
+    V = build_viewer(cfg);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    def = V.DTC_CLIM_DEFAULT_C;
+    verifyEqual(tc, def, [-12 1]);
+    frac = (0 - def(1)) / (def(2) - def(1));    % where 0 C sits on the ramp
+    verifyGreaterThan(tc, frac, 0.9);
+end
+
+
 % ============================================ SnowTemp - Nearest: helpers
 
 function test_nearest_wx_idx_selection_window_and_ties(tc)
