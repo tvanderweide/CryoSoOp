@@ -51,7 +51,7 @@
     "wx_dtc_cols": null,
     "wx_dtc_sensor_spacing_cm": null,
     "wx_dtc_bottom_height_cm": null,
-    "wx_dtc_order": null,
+    "wx_dtc_order": null
   },
   "gating": {
     "toggle": false,
