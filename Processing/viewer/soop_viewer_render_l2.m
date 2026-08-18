@@ -384,31 +384,42 @@ function soop_viewer_render_l2(V, kind)
         % Left axis: phase (wrapped circular, as collected)
         yyaxis(ax, 'left');
         h_phase = plot_series(ax, tcol(TC), y_ph, agg, ph_kind);
-        if S.cb_tod.Value
-            % Daily-filter points read better slightly larger (works on
-            % both the raw Line and the aggregated ErrorBar handle).
-            h_phase.MarkerSize = h_phase.MarkerSize + 2;
+        % aggregate drops nonfinite rows, so a selection whose displayed phase
+        % is entirely NaN/Inf leaves plot_series nothing to draw and MATLAB
+        % returns a ZERO-ELEMENT handle. Every property write and accumulator
+        % append below is skipped in that case (dot-assignment on an empty
+        % handle errors); the weather overlays and SnowTemp subplot still draw.
+        has_phase = isscalar(h_phase);
+        if has_phase
+            if S.cb_tod.Value
+                % Daily-filter points read better slightly larger (works on
+                % both the raw Line and the aggregated ErrorBar handle).
+                h_phase.MarkerSize = h_phase.MarkerSize + 2;
+            end
+            % phaseLine governs the connecting line in EVERY agg mode (both
+            % handle types): unchecked = markers only, checked = joined. Note a
+            % joined line bridges NaN samples and long capture gaps (aggregate
+            % drops nonfinite rows) and, on the wrapped views, draws jump
+            % segments at ±180° wraps.
+            if S.cb_phline.Value
+                h_phase.LineStyle = '-';
+            else
+                h_phase.LineStyle = 'none';
+            end
+            lh(end+1) = h_phase;
+            st_pts(end+1) = h_phase;    % markers scale by Pt x (incl. phaseLine)
+            st_lines(end+1) = h_phase;  % the joined phaseLine scales by Line x
         end
-        % phaseLine governs the connecting line in EVERY agg mode (both
-        % handle types): unchecked = markers only, checked = joined. Note a
-        % joined line bridges NaN samples and long capture gaps (aggregate
-        % drops nonfinite rows) and, on the wrapped views, draws jump
-        % segments at ±180° wraps.
-        if S.cb_phline.Value
-            h_phase.LineStyle = '-';
-        else
-            h_phase.LineStyle = 'none';
-        end
-        lh(end+1) = h_phase;
-        st_pts(end+1) = h_phase;    % markers scale by Pt x (incl. phaseLine)
-        st_lines(end+1) = h_phase;  % the joined phaseLine scales by Line x
         % Hour-of-day coloring (hour_on computed with the geometry plan, a
         % checked-but-disabled box draws nothing). Colors derive from the
         % SAME aggregate the displayed points use (Raw captures / Per-run
         % mean keep hour identity via the group-midpoint timestamp); the
         % plot_series handle keeps its phaseLine line / error bars but
         % hides its own markers so the colored scatter reads.
-        if hour_on
+        % Both coloring branches rebind the legend's Phase entry to their
+        % scatter, so both need the phase handle to exist. With no finite
+        % displayed phase there is nothing to color anyway.
+        if hour_on && has_phase
             [ta_h, ya_h] = M.aggregate(tcol(TC), y_ph, agg, ph_kind);
             h_phase.Marker = 'none';
             hsc = scatter(ax, ta_h, ya_h, 36, V.U.hour_bins(ta_h) + 0.5, 'filled');
@@ -426,7 +437,7 @@ function soop_viewer_render_l2(V, kind)
             hcb.Label.String = 'nearest hour (capture timebase)';
             lh(end) = hsc;                   % legend binds the colored points
             st_dots(end+1) = hsc;            % dot area scales by (Pt x)^2
-        elseif snr_on
+        elseif snr_on && has_phase
             % Phase and SNR must summarize the SAME captures: aggregate()
             % drops non-finite y BEFORE grouping, so aggregating them
             % separately can change both group membership and the group
@@ -464,7 +475,11 @@ function soop_viewer_render_l2(V, kind)
             ylabel(ax, 'Phase (deg)');
             ylim(ax, [-180 180]);  yticks(ax, -180:90:180);
         end
-        leg{end+1} = 'Phase';
+        % Paired with the lh append above: skipped together when the phase
+        % handle is empty, so lh and leg stay the same length.
+        if has_phase
+            leg{end+1} = 'Phase';
+        end
         % Overflow marks (exclusion off, Raw captures only): red points at
         % the flagged captures' displayed values — exactly what those rows
         % contribute to the series (post chain-cal/unwrap). Marker-only
@@ -472,16 +487,21 @@ function soop_viewer_render_l2(V, kind)
         % handles so it overpaints them; appended after the completed
         % Phase handle/label pair so lh and leg stay aligned; markers
         % scale with Pt x (st_pts only — no line, no scatter dots).
+        % Marker size/shape are copied from the phase handle, so an empty one
+        % falls back to the plain defaults.
         if mark_ovf
-            if strcmp(h_phase.Marker, 'none')   % hour coloring hid the markers
-                mk = 'o';
-            else
-                mk = h_phase.Marker;
+            mk    = 'o';
+            mk_sz = 6;
+            if has_phase
+                mk_sz = h_phase.MarkerSize;
+                if ~strcmp(h_phase.Marker, 'none')  % hour coloring hides markers
+                    mk = h_phase.Marker;
+                end
             end
             t_TC = tcol(TC);
             h_ovf = plot(ax, t_TC(ovf_m), y_ph(ovf_m), ...
                          'LineStyle', 'none', 'Marker', mk, ...
-                         'MarkerSize', h_phase.MarkerSize, ...
+                         'MarkerSize', mk_sz, ...
                          'Color', [0.850 0.100 0.100], ...
                          'MarkerFaceColor', [0.850 0.100 0.100]);
             lh(end+1) = h_ovf;
@@ -791,11 +811,13 @@ function soop_viewer_render_l2(V, kind)
                 % VWC ruler sits in its own reserved slot while [t0,t1] stays
                 % time-aligned with the thermograph beneath.
                 G  = V.U.soil_geometry(V.cfg);
+                % Tagged so tests and export code can find the overlay without
+                % guessing at axes order.
                 axV = axes(S.panel, 'Position', ...
                            [dtc_pos(1) dtc_pos(2) P.soil_w dtc_pos(4)], ...
                            'Color', 'none', 'YAxisLocation', 'right', ...
                            'XTick', [], 'Box', 'off', 'HitTest', 'off', ...
-                           'PickableParts', 'none');
+                           'PickableParts', 'none', 'Tag', 'soop_soil_vwc');
                 hold(axV, 'on');
                 sl  = gobjects(0);
                 slg = {};
@@ -804,8 +826,14 @@ function soop_viewer_render_l2(V, kind)
                     [ts_k, vs_k] = M.aggregate(tcol(TW), TW.soil_vwc(:, sk), ...
                                                agg_wx, 'lin');
                     if isempty(ts_k), continue; end
-                    sl(end+1) = plot(axV, ts_k, vs_k, '-', ...
-                        'Color', V.U.soil_color(sk), 'LineWidth', 1); %#ok<AGROW>
+                    % Line style is redundant with color so depth stays
+                    % readable in grayscale print and to color-blind viewers.
+                    % Non-pickable like the axes: this overlay is a readout,
+                    % never a click target over the thermograph beneath.
+                    sl(end+1) = plot(axV, ts_k, vs_k, ...
+                        'LineStyle', V.U.soil_linestyle(sk), ...
+                        'Color', V.U.soil_color(sk), 'LineWidth', 1, ...
+                        'HitTest', 'off', 'PickableParts', 'none'); %#ok<AGROW>
                     slg{end+1} = G.labels{sk};                        %#ok<AGROW>
                     fin = vs_k(isfinite(vs_k));
                     if ~isempty(fin), vmax = max(vmax, max(fin)); end

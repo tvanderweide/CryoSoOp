@@ -240,6 +240,47 @@ function test_snrcolor_joint_mask_keeps_color_aligned_with_phase(tc)
 end
 
 
+function test_snrcolor_per_run_mean_drops_contribution_from_both(tc)
+% Per-run mean groups before averaging, so a row with finite SNR but non-finite
+% phase must be excluded from BOTH the plotted group value and its colour — a
+% row dropped from only one of the two would shift the group's midpoint
+% timestamp relative to its colour and silently mis-colour the point.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.CAND.corr_41622(2) = NaN;        % finite SNR (20 dB), non-finite phase
+    V.cb_snrcolor.Value = true;
+    V.dd_agg.Value = 'Per-run mean';
+    soop_viewer_render_l2(V, CAND_KIND);
+
+    hsc = findobj(V.panel, 'Type', 'scatter');
+    verifyNumElements(tc, hsc, 1);
+    verifyNumElements(tc, hsc.CData, numel(hsc.XData), ...
+        'one colour per drawn point');
+    % The 20 dB row contributed to neither the phase nor the SNR aggregate.
+    verifyFalse(tc, any(abs(hsc.CData(:) - 20) < 1e-9), ...
+        'the dropped row must not colour any group');
+end
+
+
+function test_snrcolor_survives_nonfinite_transformed_phase(tc)
+% The unwrapped view transforms the phase before display. A non-finite value in
+% the TRANSFORMED series must drop from the coloring the same way a raw
+% non-finite value does, with no error and no colour left stranded.
+    V = candidates_viewer(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+    V.CAND.corr_41622(2) = Inf;
+    V.cb_snrcolor.Value = true;
+    soop_viewer_render_l2(V, ...
+        ['L2: Candidates Unwrapped ' char(8212) ' MUOS-5 (41622)']);
+
+    hsc = findobj(V.panel, 'Type', 'scatter');
+    if ~isempty(hsc)
+        verifyNumElements(tc, hsc.CData, numel(hsc.XData));
+        verifyTrue(tc, all(isfinite(hsc.YData)));
+    end
+end
+
+
 function test_snrcolor_hour_wins_when_both_set(tc)
 % A stale state with both checked draws the hour colormap only.
     V = candidates_viewer(tc);
