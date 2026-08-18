@@ -2,6 +2,7 @@ function compute_L1(cfg)
 % Compute L1 cross-correlation products from paired UHF signal captures.
 % Appends new pairs in batches and writes one product set per RFI method.
 % Uses serial gpuArray FFTs or CPU parfor according to cfg.use_gpu.
+% Isolates CSSL data into MUOS or RFI pulse signal.
 % Cross-correlations use D.*conj(R): direct = ch0, reflected = ch1.
 %
 % Input: UHF_YYYYMMDDHHMMSS_ch0.dat (direct) / _ch1.dat (reflected), each
@@ -36,7 +37,8 @@ function compute_L1(cfg)
 %
 % cfg fields consumed: data_dir, out_dir, fs, Ti, num_segs, peak_lag,
 % lag_half_win, min_bytes, batch_size (default 200), use_gpu, overflow_file,
-% rfi_methods (default {'none'}), rfi_bands, muos_bands.
+% rfi_methods (default {'none'}), rfi_bands, muos_bands, toggle, mode
+% window_ms, transition_ms.
 %
 
     % --- Find signal ch0/ch1 pairs ---
@@ -356,6 +358,22 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
     n_want = npts * cfg.num_segs;
     ch0 = read_channel(ch0_path, n_want);
     ch1 = read_channel(ch1_path, n_want);
+
+    % Time-domain gating for CSSL RFI pulses
+    if isfield(cfg, 'toggle') && cfg.toggle
+        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);
+        fprintf('doing gating in L1')
+        switch lower(cfg.mode)
+            case 'quiet'
+                ch0 = ch0 .* quiet_mask;
+                ch1 = ch1 .* quiet_mask;
+                fprintf('using quiet')
+            case 'loud'
+                ch0 = ch0 .* loud_mask;
+                ch1 = ch1 .* loud_mask;
+            case 'none'
+        end
+    end
 
     n_segs_avail = floor(min(numel(ch0), numel(ch1)) / npts);
     n_segs_avail = min(n_segs_avail, cfg.num_segs);

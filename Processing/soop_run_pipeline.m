@@ -44,7 +44,7 @@ if any([toggles.run_L1, toggles.run_calib, toggles.run_snr, toggles.run_rfi]) &&
         if ~isfolder(js), mkdir(js); end
         c.JobStorageLocation = js;
     end
-    parpool(c, nw);
+    parpool(c, min(nw, c.NumWorkers));
     fprintf('[BrundageSoOp] parpool: %d workers.\n', nw);
 end
 

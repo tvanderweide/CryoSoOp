@@ -50,6 +50,20 @@ function soop_viewer_render_raw(V, kind)
                     [P0_full, f_full] = M.welch_psd_filtered(ch0, cfg.fs, seg, D.method, excis, Erfi.apply);
                     P1_full = M.welch_psd_filtered(ch1, cfg.fs, seg, D.method, excis, Erfi.apply);
                 end
+
+                % If time domain gating was used, some samples are now
+                % exactly 0, and an active fraction is calculated to scale 
+                % the PSD back up.
+                duty_cycle0 = sum(ch0 ~= 0) / numel(ch0);
+                duty_cycle1 = sum(ch1 ~= 0) / numel(ch1);
+
+                if duty_cycle0 > 0 && duty_cycle0 < 1.0
+                    P0_full = P0_full / duty_cycle0;
+                end
+                if duty_cycle1 > 0 && duty_cycle1 < 1.0
+                    P1_full = P1_full / duty_cycle1;
+                end
+                
                 [D.f,  D.P0] = M.decimate_spectrum(f_full, P0_full, 4000, 'mean');
                 [~,    D.P1] = M.decimate_spectrum(f_full, P1_full, 4000, 'mean');
             case 'Raw: Cross-correlation profile'
@@ -394,6 +408,27 @@ function [ch0, ch1] = rr_load_capture(V, base)
     ch1 = M.read_channel(p1, n_want);
     n = min(numel(ch0), numel(ch1));
     ch0 = ch0(1:n);  ch1 = ch1(1:n);
+
+    % Time-domain gating for CSSL RFI pulses
+    % Temporal gating not applied to noise or load
+    is_calib = contains(string(base), {'_L_', '_NL_', '_Load_'}, 'IgnoreCase', true);
+    if isfield(cfg, 'toggle') && cfg.toggle && ~is_calib
+        fprintf('toggle in viewer')
+        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);   
+        gate_mode = 'quiet';
+        if isfield(cfg, 'gating_mode')
+            gate_mode = cfg.mode;
+        end
+
+        switch lower(gate_mode)
+            case 'quiet'
+                ch0 = ch0 .* quiet_mask;
+                ch1 = ch1 .* quiet_mask;
+            case 'loud'
+                ch0 = ch0 .* loud_mask;
+                ch1 = ch1 .* loud_mask;
+        end
+    end
 end
 
 
