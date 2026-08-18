@@ -289,6 +289,29 @@ function test_wx_axes_plan_matrix(tc)
     P = U.wx_axes_plan(true, true, true, true);        % + hour coloring
     verifyEqual(tc, P.ax_pos, [0.09 0.25 0.62 0.68], 'AbsTol', 1e-12);
     verifyEqual(tc, P.cb_pos, [0.09 0.11 0.62 0.04], 'AbsTol', 1e-12);
+
+    % Soil overlay off (default and explicit): no soil width, and the DTC
+    % colorbar keeps its narrow gap against the thermograph axes.
+    P = U.wx_axes_plan(true, true, true, false);
+    verifyTrue(tc, isempty(P.soil_w));
+    verifyEqual(tc, P.dtc_cb_gap, 0.015, 'AbsTol', 1e-12);
+    P = U.wx_axes_plan(true, true, true, false, false);
+    verifyTrue(tc, isempty(P.soil_w));
+
+    % Soil overlay on: it claims a slot out of the SAME 0.86 budget, so the
+    % stacked axes narrow together (x-alignment preserved) instead of the
+    % ruler overrunning the panel, and the DTC colorbar steps out to clear it.
+    P = U.wx_axes_plan(false, false, false, false, true);
+    verifyEqual(tc, P.ax_pos(3), 0.74, 'AbsTol', 1e-12);
+    verifyEqual(tc, P.soil_w, 0.80, 'AbsTol', 1e-12);
+    verifyEqual(tc, P.dtc_cb_gap, 0.135, 'AbsTol', 1e-12);
+    P = U.wx_axes_plan(true, true, true, true, true);   % every slot claimed
+    verifyEqual(tc, P.ax_pos(3), 0.50, 'AbsTol', 1e-12);
+    verifyEqual(tc, P.swe_w, 0.56, 'AbsTol', 1e-12);
+    verifyEqual(tc, P.tmp_w, 0.62, 'AbsTol', 1e-12);
+    verifyEqual(tc, P.soil_w, 0.56, 'AbsTol', 1e-12);
+    % Colorbar strip stays inside the panel with every overlay on.
+    verifyLessThanOrEqual(tc, P.ax_pos(1) + P.ax_pos(3) + P.dtc_cb_gap + 0.015, 1);
 end
 
 function test_overlay_colorbar_alignment(tc)
@@ -1026,14 +1049,14 @@ function test_style_layout_and_gating(tc)
     verifyEqual(tc, V.sp_ptsz.Step, 0.25);
     verifyEqual(tc, V.sp_abvfrz_nearest_linew.Step, 0.5);
 
-    % Placement: directly under the legend row; grid has 24 x 28 px control
+    % Placement: directly under the legend row; grid has 25 x 28 px control
     % rows before the two 56 px sub-grid rows.
     g = V.style_row.Parent;
     verifyEqual(tc, V.style_row.Layout.Row, ...
                 V.dd_legend.Parent.Layout.Row + 1);
-    verifyNumElements(tc, g.RowHeight, 34);
-    verifyEqual(tc, [g.RowHeight{1:24}], repmat(28, 1, 24));
-    verifyEqual(tc, [g.RowHeight{25:26}], [56 56]);
+    verifyNumElements(tc, g.RowHeight, 35);
+    verifyEqual(tc, [g.RowHeight{1:25}], repmat(28, 1, 25));
+    verifyEqual(tc, [g.RowHeight{26:27}], [56 56]);
 
     % The new modifier is directly under Daily capture nearest. It appears
     % only for the four MUOS Candidates plots and is selectable only while

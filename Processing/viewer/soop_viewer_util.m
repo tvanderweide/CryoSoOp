@@ -1019,7 +1019,7 @@ function R = wx_axis_cfg(series, vals)
 end
 
 
-function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on)
+function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on, soil_on)
 % Deterministic axes/colorbar geometry + right-ruler ownership for the
 % candidates figure (normalized panel units; the render never reads live
 % Position values):
@@ -1027,12 +1027,18 @@ function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on)
 %              (depth when shown; SWE only when depth is off)
 %   .swe_ovl — SWE needs its own overlay axes (both series shown)
 %   .ax_pos  — main axes [x y w h]; a bottom strip is reserved for the
-%              hour-color bar when hour_on
-%   .cb_pos  — manual hour-colorbar strip ([] when hour_on is false);
+%              point-color bar (hour or SNR) when hour_on
+%   .cb_pos  — manual point-colorbar strip ([] when hour_on is false);
 %              pinning the colorbar Position stops MATLAB's auto-layout
 %              from shrinking ax after ax_pos was chosen
 %   .swe_w / .tmp_w — overlay axes widths: ruler slots step out by SLOT_W
 %              (SWE inner, temperatures outer)
+%   .soil_w  — soil-moisture overlay width on the SnowTemp axes ([] when
+%              soil_on is false). Its ruler takes a slot reclaimed from the
+%              axes width, so BOTH stacked axes narrow together and stay
+%              x-aligned instead of the ruler overrunning the panel edge
+%   .dtc_cb_gap — gap from the SnowTemp axes right edge to its temperature
+%              colorbar, widened to clear the soil ruler when soil_on
     P.swe_ovl = show_dep && show_swe;
     if show_dep
         P.right = 'depth';
@@ -1041,8 +1047,10 @@ function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on)
     else
         P.right = 'none';
     end
+    if nargin < 5, soil_on = false; end
     SLOT_W = 0.06;   % per-ruler right-margin slot (spine-to-spine gap)
-    axW = 0.86 - 2 * SLOT_W * (double(P.swe_ovl) + double(want_temp));
+    axW = 0.86 - 2 * SLOT_W * ...
+          (double(P.swe_ovl) + double(want_temp) + double(soil_on));
     if hour_on
         P.ax_pos = [0.09 0.25 axW 0.68];
         P.cb_pos = [0.09 0.11 axW 0.04];
@@ -1052,6 +1060,15 @@ function P = wx_axes_plan(show_dep, show_swe, want_temp, hour_on)
     end
     P.swe_w = axW + SLOT_W;
     P.tmp_w = axW + SLOT_W * (1 + double(P.swe_ovl));
+    if soil_on
+        P.soil_w = axW + SLOT_W;
+        % Clear the full slot (spine step + tick-label margin) so the soil
+        % ruler's labels are not crowded by the colorbar strip.
+        P.dtc_cb_gap = 0.015 + 2 * SLOT_W;
+    else
+        P.soil_w     = [];
+        P.dtc_cb_gap = 0.015;
+    end
 end
 
 

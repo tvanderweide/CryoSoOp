@@ -356,7 +356,13 @@ function soop_viewer_render_l2(V, kind)
         % overlay slot when both series are shown, the temperature slot,
         % and the manual point-color colorbar strip (hour or SNR).
         color_on = hour_on || snr_on;
-        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, color_on);
+        % Soil moisture overlays the SnowTemp axes, so it only draws when that
+        % subplot is up. The render re-checks the callbacks' Enable predicate,
+        % which keeps a checked-but-disabled box inert.
+        soil_on = S.cb_soilvwc.Value && show_snowtemp && ...
+                  V.U.soil_usable(S.WX, V.cfg) && has_col('soil_vwc') && ...
+                  any(isfinite(TW.soil_vwc(:)));
+        P = V.U.wx_axes_plan(show_dep, show_swe, want_temp, color_on, soil_on);
         ax_pos = P.ax_pos;
         if show_snowtemp
             if color_on
@@ -741,7 +747,9 @@ function soop_viewer_render_l2(V, kind)
                 clim(axD, [-12 1]);
                 cbD = colorbar(axD, 'eastoutside');
                 cbD.Label.String = 'Snow temperature [\circC]';
-                cbD.Position = [dtc_pos(1) + dtc_pos(3) + 0.015, ...
+                % Gap widens to clear the soil-moisture ruler when that overlay
+                % claims the slot immediately right of this axes.
+                cbD.Position = [dtc_pos(1) + dtc_pos(3) + P.dtc_cb_gap, ...
                                 dtc_pos(2), 0.015, dtc_pos(4)];
                 axD.Position = dtc_pos;
                 ylabel(axD, 'Height Above Ground [cm]');
@@ -773,6 +781,52 @@ function soop_viewer_render_l2(V, kind)
             xlim(axD, [t0 t1]);
             xlabel(axD, 'Date');
             linkaxes([ax axD], 'x');
+            if soil_on
+                % SoilVUE volumetric water content (m^3/m^3) on a transparent
+                % overlay of the thermograph axes: one line per configured rod
+                % position, labelled by depth BELOW GROUND (rod position minus
+                % the surface offset). Created after axD so the opaque
+                % thermograph cannot paint over it. Same wider-axes/stretched-
+                % XLim trick as the SWE and temperature overlays — the brown
+                % VWC ruler sits in its own reserved slot while [t0,t1] stays
+                % time-aligned with the thermograph beneath.
+                G  = V.U.soil_geometry(V.cfg);
+                axV = axes(S.panel, 'Position', ...
+                           [dtc_pos(1) dtc_pos(2) P.soil_w dtc_pos(4)], ...
+                           'Color', 'none', 'YAxisLocation', 'right', ...
+                           'XTick', [], 'Box', 'off', 'HitTest', 'off', ...
+                           'PickableParts', 'none');
+                hold(axV, 'on');
+                sl  = gobjects(0);
+                slg = {};
+                vmax = 0;
+                for sk = 1:numel(G.rod_cm)
+                    [ts_k, vs_k] = M.aggregate(tcol(TW), TW.soil_vwc(:, sk), ...
+                                               agg_wx, 'lin');
+                    if isempty(ts_k), continue; end
+                    sl(end+1) = plot(axV, ts_k, vs_k, '-', ...
+                        'Color', V.U.soil_color(sk), 'LineWidth', 1); %#ok<AGROW>
+                    slg{end+1} = G.labels{sk};                        %#ok<AGROW>
+                    fin = vs_k(isfinite(vs_k));
+                    if ~isempty(fin), vmax = max(vmax, max(fin)); end
+                end
+                % Floor pinned at 0: rod segments in air or snow sit below the
+                % sensor's calibrated permittivity range and read exactly
+                % 0 m^3/m^3, so that value must read as the scale's bottom
+                % rather than float mid-axis.
+                if ~isfinite(vmax) || vmax <= 0, vmax = 0.05; end
+                ylim(axV, [0, vmax * 1.1]);
+                xlim(axV, [t0, t0 + (t1 - t0) * (P.soil_w / dtc_pos(3))]);
+                ylabel(axV, 'Soil VWC [m^3/m^3]');
+                axV.YColor = V.U.soil_color(2);
+                if ~isempty(sl)
+                    legend(axV, sl, slg, 'Location', 'northwest');
+                end
+                % These lines are born after the shared style pass above, so
+                % the Line x spinner is applied to them here.
+                V.U.style_apply(V.U.style_factors(S.sp_linew.Value, ...
+                    S.sp_ptsz.Value), sl, gobjects(0), gobjects(0));
+            end
         end
         S.last_n = height(TC);
         return;

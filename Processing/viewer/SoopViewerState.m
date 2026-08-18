@@ -146,6 +146,8 @@ classdef SoopViewerState < handle
         abvfrz_nearest_width_row
         cb_snowtemp_nearest
         snowtemp_nearest_row
+        cb_soilvwc
+        soilvwc_row
         cb_phline
         phline_row
         sp_snrcut

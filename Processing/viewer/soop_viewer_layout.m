@@ -145,12 +145,12 @@ function soop_viewer_layout(V)
 
     S.panel = uipanel(r3);   % plots (tiledlayout rebuilt per render)
 
-    info_gl = uigridlayout(r3, [34 1]);
-    % Rows 25/26 (geometry toggles, footprint-map controls) are two-line
+    info_gl = uigridlayout(r3, [35 1]);
+    % Rows 26/27 (geometry toggles, footprint-map controls) are two-line
     % sub-grids — 56 px so both lines fit inside the ~240 px side panel.
-    % The 28 px control rows are children 1-24 (the run of 28s below), so a
+    % The 28 px control rows are children 1-25 (the run of 28s below), so a
     % new control row's height entry must be inserted BEFORE the two 56s.
-    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
+    info_gl.RowHeight  = {28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 56, 56, 22, 150, 22, 250, 22, 60, 22, 'fit'};
     info_gl.Padding    = [6 6 6 6];
     info_gl.Scrollable = 'on';   % side panel can scroll if content is tall
     % Title / X-label / Y-label override rows — text field + Set button. Empty
@@ -379,6 +379,23 @@ function soop_viewer_layout(V)
         'ValueChangedFcn', @(~,~) V.CB.refresh(V));
     S.snowtemp_nearest_row = snowtemp_nearest_row;
     S.snowtemp_nearest_row.Visible = 'off';
+
+    % SoilMoisture overlays the SoilVUE volumetric water content on the same
+    % SnowTemp subplot, on its own right ruler, so soil wetting can be read
+    % against the snowpack thermograph above it. Needs the configured rod
+    % geometry and a soil_vwc column in the weather table.
+    soilvwc_row = uigridlayout(info_gl, [1 1]);
+    soilvwc_row.Padding = [0 0 0 0];
+    S.cb_soilvwc = uicheckbox(soilvwc_row, ...
+        'Text', 'SnowTemp - SoilMoisture', 'Value', false, 'Enable', 'off', ...
+        'Tooltip', ['Overlay SoilVUE volumetric water content (m^3/m^3) on ' ...
+                    'the SnowTemp subplot, one line per configured rod ' ...
+                    'position, labelled by depth below ground. Rod segments ' ...
+                    'in air or snow sit below the sensor''s calibrated ' ...
+                    'permittivity range and read exactly 0.'], ...
+        'ValueChangedFcn', @(~,~) V.CB.refresh(V));
+    S.soilvwc_row = soilvwc_row;
+    S.soilvwc_row.Visible = 'off';
 
     % phaseLine — shown only on the candidates-family views. Governs the
     % phase series' connecting line in EVERY aggregation mode: unchecked =

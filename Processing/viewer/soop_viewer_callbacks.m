@@ -52,7 +52,7 @@ function set_family_rows(V, is_cand, is_candidate_plot)
          S.fringe_row, S.hour_row, S.snrcolor_row, S.style_row], 'Visible', on);
     nearest_on = matlab.lang.OnOffSwitchState(is_candidate_plot);
     set([S.abvfrz_nearest_row, S.abvfrz_nearest_width_row, ...
-         S.snowtemp_nearest_row], 'Visible', nearest_on);
+         S.snowtemp_nearest_row, S.soilvwc_row], 'Visible', nearest_on);
     S.cb_abvfrz_nearest.Enable = ...
         matlab.lang.OnOffSwitchState(is_candidate_plot && S.cb_tod.Value);
     % Needs both prerequisites: the daily filter defines "nearest", and there
@@ -60,6 +60,10 @@ function set_family_rows(V, is_cand, is_candidate_plot)
     % checked value intact, like the other modifier controls.
     S.cb_snowtemp_nearest.Enable = matlab.lang.OnOffSwitchState( ...
         is_candidate_plot && S.cb_tod.Value && S.cb_snowtemp.Value);
+    % The soil overlay shares the thermograph's axes, so it needs SnowTemp on,
+    % plus configured rod geometry and a matching soil_vwc column to draw from.
+    S.cb_soilvwc.Enable = matlab.lang.OnOffSwitchState( ...
+        is_candidate_plot && S.cb_snowtemp.Value && V.U.soil_usable(S.WX, V.cfg));
 end
 
 

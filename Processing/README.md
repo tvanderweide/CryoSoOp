@@ -280,6 +280,17 @@ DTC profile within ±35 min, matched against the full weather record and only
 among profiles the thermograph can draw. The snow-depth and ground lines stay
 continuous, and the height axis keeps the displayed range's depth extent.
 
+The side-panel `SnowTemp - SoilMoisture` option, enabled only while `SnowTemp`
+is on and the site configures SoilVUE rod geometry (`wx_soil_vwc_cols`,
+`wx_soil_rod_cm`, `wx_soil_surface_rod_cm`), overlays volumetric water content
+in m³/m³ on the thermograph axes with its own brown right ruler — one line per
+configured rod position, shaded light-to-dark with increasing depth. Legend
+labels are depth **below ground** (rod position minus the surface offset), not
+the rod positions the logger headers name. The scale is pinned at 0 because rod
+segments standing in air or snow fall below the sensor's calibrated
+permittivity range and return exactly 0 m³/m³ — a valid reading, not a gap —
+which is why only the buried rod positions are worth configuring.
+
 ## Testing
 
 MATLAB unit tests for the RFI excision path live in `tests/`

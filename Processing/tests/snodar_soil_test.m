@@ -281,3 +281,135 @@ function test_soil_color_distinct_and_cyclic(tc)
     verifyEqual(tc, U.soil_color(0), c1);             % out-of-range guard
     verifyEqual(tc, U.soil_color(NaN), c1);
 end
+
+
+% ------------------------------------------------------- viewer: row + gating
+
+function test_soilvwc_row_placement_and_gating(tc)
+    % Real layout built headlessly: the modifier sits directly under
+    % SnowTemp - Nearest, is hidden at build, and becomes selectable only on a
+    % candidates plot with SnowTemp on AND a usable soil column in the loaded
+    % weather table. Disabling preserves the checked value.
+    V = build_layout(tc);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    verifyEqual(tc, V.soilvwc_row.Layout.Row, ...
+                V.snowtemp_nearest_row.Layout.Row + 1);
+    verifyFalse(tc, logical(V.soilvwc_row.Visible));
+    verifyFalse(tc, logical(V.cb_soilvwc.Value));
+    verifyFalse(tc, logical(V.cb_soilvwc.Enable));
+
+    % Candidates family shows the row with the other nearest-group modifiers.
+    V.CB.set_family_rows(V, true, true);
+    verifyTrue(tc, logical(V.soilvwc_row.Visible));
+    % SnowTemp off -> not selectable even with soil data present.
+    V.WX = soil_wx(tc);
+    V.CB.set_family_rows(V, true, true);
+    verifyFalse(tc, logical(V.cb_soilvwc.Enable));
+    % SnowTemp on + usable data -> selectable.
+    V.cb_snowtemp.Value = true;
+    V.CB.set_family_rows(V, true, true);
+    verifyTrue(tc, logical(V.cb_soilvwc.Enable));
+    % Configured geometry but no soil column -> not selectable.
+    V.cb_soilvwc.Value = true;
+    V.WX = removevars(soil_wx(tc), 'soil_vwc');
+    V.CB.set_family_rows(V, true, true);
+    verifyFalse(tc, logical(V.cb_soilvwc.Enable));
+    verifyTrue(tc, logical(V.cb_soilvwc.Value));   % checked value survives
+    % Non-candidates plot hides the row again.
+    V.CB.set_family_rows(V, true, false);
+    verifyFalse(tc, logical(V.soilvwc_row.Visible));
+end
+
+
+% ------------------------------------------------------ viewer: overlay geometry
+
+function test_soil_overlay_geometry(tc)
+    % Graphics contract built FROM the production plan: the soil overlay is
+    % transparent, shares the thermograph's left edge and height, maps [t0,t1]
+    % to the same normalized x despite its wider axes, keeps its ruler and the
+    % DTC colorbar from overlapping, and stays inside the panel.
+    U = tc.TestData.U;
+    P = U.wx_axes_plan(true, true, true, false, true);
+    dtc_pos = [P.ax_pos(1) 0.13 P.ax_pos(3) 0.22];
+
+    fig = uifigure('Visible', 'off', 'Position', [80 80 1200 620]);
+    cleanup = onCleanup(@() delete(fig));
+    pnl = uipanel(fig, 'Units', 'normalized', 'Position', [0 0 1 1]);
+    t0 = datetime(2026, 1, 1);  t1 = t0 + days(30);
+
+    axD = axes(pnl, 'Position', dtc_pos);
+    surface(axD, [t0 t1], [-45 0 60]', zeros(3, 2), -5 * ones(3, 2), ...
+            'EdgeColor', 'none');
+    clim(axD, [-12 1]);
+    cbD = colorbar(axD, 'eastoutside');
+    cbD.Position = [dtc_pos(1) + dtc_pos(3) + P.dtc_cb_gap, dtc_pos(2), ...
+                    0.015, dtc_pos(4)];
+    axD.Position = dtc_pos;          % undo the colorbar's auto-shrink
+    xlim(axD, [t0 t1]);
+
+    axV = axes(pnl, 'Position', [dtc_pos(1) dtc_pos(2) P.soil_w dtc_pos(4)], ...
+               'Color', 'none', 'YAxisLocation', 'right', 'XTick', [], ...
+               'Box', 'off', 'HitTest', 'off', 'PickableParts', 'none');
+    hold(axV, 'on');
+    for k = 1:3
+        plot(axV, [t0 t1], [0 0.3], '-', 'Color', U.soil_color(k));
+    end
+    xlim(axV, [t0, t0 + (t1 - t0) * (P.soil_w / dtc_pos(3))]);
+    ylim(axV, [0 0.33]);
+
+    % Transparent, so the thermograph beneath stays visible.
+    verifyEqual(tc, axV.Color, 'none');
+    verifyEqual(tc, axV.YAxisLocation, 'right');
+    % Same origin and height as the thermograph it overlays.
+    verifyEqual(tc, axV.Position([1 2 4]), dtc_pos([1 2 4]), 'AbsTol', 1e-12);
+    verifyGreaterThan(tc, axV.Position(3), dtc_pos(3));   % ruler steps outward
+
+    % t1 lands at the same normalized x on both axes despite the wider overlay.
+    fx = @(ax, t) ax.Position(1) + ax.Position(3) * ...
+         (seconds(t - ax.XLim(1)) / seconds(ax.XLim(2) - ax.XLim(1)));
+    verifyEqual(tc, fx(axV, t1), fx(axD, t1), 'AbsTol', 1e-12);
+    verifyEqual(tc, fx(axV, t0), fx(axD, t0), 'AbsTol', 1e-12);
+
+    % The colorbar starts right of the soil ruler's spine and the whole strip
+    % stays inside the panel.
+    verifyGreaterThan(tc, cbD.Position(1), axV.Position(1) + axV.Position(3));
+    verifyLessThanOrEqual(tc, cbD.Position(1) + cbD.Position(3), 1);
+end
+
+
+% ------------------------------------------------------------- local fixtures
+
+function V = build_layout(tc)
+% Headless viewer layout with the Brundage rod geometry configured.
+    cfg = soil_cfg();
+    cfg.freq_hz = 370e6;  cfg.fs = 20e6;  cfg.num_segs = 2;  cfg.Ti = 0.9;
+    cfg.peak_lag = -0.575;  cfg.T_load_K = 290;
+    cfg.out_dir = tc.TestData.dir;  cfg.data_dir = tc.TestData.dir;
+    V = SoopViewerState();
+    V.cfg = cfg;
+    V.M   = BrundageSoOp_fun();
+    V.npts = floor(cfg.fs * cfg.Ti);  V.n_want = V.npts * cfg.num_segs;
+    V.calib_N_looks = cfg.fs * 2;
+    V.Erfi = rfi_excise();
+    V.L1 = table();  V.CAL = table();  V.WX = table();
+    V.cache = struct('key', "", 'data', []);
+    V.calib_base_cache  = struct('dir', "", 'T', table());
+    V.calib_notch_cache = struct('dir', "", 'T', table());
+    V.busy = false;  V.pending = false;  V.last_n = 0;
+    V.OVF = strings(0, 1);  V.OVF_ok = false;  V.OVF_src = "";
+    V.cap_folders = containers.Map('KeyType', 'char', 'ValueType', 'char');
+    V.ov_title = '';  V.ov_xlabel = '';  V.ov_ylabel = '';
+    V.ov_plot_kind = '';
+    V.U = soop_viewer_util();  V.D = soop_viewer_data();
+    V.CB = soop_viewer_callbacks();
+    [V.PLOT_INFO, V.CAP_PATTERNS] = soop_viewer_catalog(cfg);
+    soop_viewer_layout(V);
+end
+
+function WX = soil_wx(tc)
+% Weather table carrying a drawable 3-rod soil_vwc column.
+    ts = stamps(tc, 4);
+    WX = table(ts, [0.10; 0.12; 0.14; 0.16] * [1 1 1], ...
+               'VariableNames', {'timestamp', 'soil_vwc'});
+end
