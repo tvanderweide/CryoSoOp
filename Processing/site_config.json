@@ -54,7 +54,7 @@
     "wx_dtc_order": "top_to_bottom"
   },
   "gating": {
-    "toggle": true,
+    "toggle": false,
     "mode": "quiet",
     "window_ms": 0.5,
     "transition_ms": 2.0
