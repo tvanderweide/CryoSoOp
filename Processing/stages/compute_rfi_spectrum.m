@@ -27,10 +27,10 @@ function compute_rfi_spectrum(cfg)
     ap.max_caps  = getdef(cfg, 'rfi_max_captures', 500);    % even season subsample
     ap.base_khz  = getdef(cfg, 'rfi_env_khz', 1000);        % occupancy baseline width = the shared PSD-envelope width (cfg.rfi_env_khz)
     % Gating:
-    ap.toggle    = getdef(cfg, 'toggle', false);     % default (false) does zero gating: same as original script
-    ap.mode      = getdef(cfg, 'mode', 'quiet');     % if gating toggled on, looks at quiet (MUOS) signal, not RFI pulse signal
-    ap.window_ms = getdef(cfg, 'window_ms', 0.5);    % default val has been tested and works well
-    ap.transition_ms  = getdef(cfg, 'transition_ms', 2.0);     % default val has been tested and works well
+    ap.toggle    = getdef(cfg, 'toggle');
+    ap.mode      = getdef(cfg, 'mode');
+    ap.window_ms = getdef(cfg, 'window_ms');
+    ap.transition_ms  = getdef(cfg, 'transition_ms');
     % If gating is enabled, scale up the samples read per file to ensure that
     % after masking RFI bursts, there are still adequate segments to average.
     if ap.toggle
