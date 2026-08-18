@@ -53,6 +53,7 @@ function U = soop_viewer_util()
     U.soil_geometry = @soil_geometry;
     U.soil_usable = @soil_usable;
     U.soil_color = @soil_color;
+    U.soil_linestyle = @soil_linestyle;
     U.nearest_wx_idx = @nearest_wx_idx;
     U.band_halfwidth = @band_halfwidth;
     U.snowtemp_nearest_bands = @snowtemp_nearest_bands;
@@ -1536,6 +1537,13 @@ function G = soil_geometry(cfg)
 % surface, so depth below ground is rod position minus surface position. THE ONE
 % place that subtraction lives, so labels and gating cannot disagree. Order is
 % the configured order, which is the column order of WX.soil_vwc.
+%
+% FAIL-CLOSED: a rod list that is duplicated, non-increasing, or at/above the
+% surface, or a missing/invalid surface position, disables the overlay instead
+% of drawing. Every one of those cases would attach wrong depth semantics to
+% otherwise-valid data — the surface offset is what separates rod positions
+% (what the headers name) from depth below ground (what the labels claim), and
+% inventing a reference plane silently relabels rod 60 cm as "60 cm deep".
     G = struct('ok', false, 'why', '', 'rod_cm', [], 'depth_cm', [], ...
                'surface_cm', NaN, 'labels', {{}});
     if ~isfield(cfg, 'wx_soil_rod_cm') || isempty(cfg.wx_soil_rod_cm) || ...
@@ -1543,23 +1551,43 @@ function G = soil_geometry(cfg)
         G.why = 'Soil rod positions are not configured.';
         return;
     end
-    rod = double(cfg.wx_soil_rod_cm(:))';
-    if ~all(isfinite(rod))
-        G.why = 'Soil rod positions must all be finite.';
+    rod = cfg.wx_soil_rod_cm(:)';
+    if ~isreal(rod) || ~all(isfinite(rod))
+        G.why = 'Soil rod positions must all be real and finite.';
         return;
     end
-    surface = 0;
-    if isfield(cfg, 'wx_soil_surface_rod_cm') && ~isempty(cfg.wx_soil_surface_rod_cm)
-        surface = cfg.wx_soil_surface_rod_cm;
+    rod = double(rod);
+    if numel(unique(rod)) ~= numel(rod)
+        G.why = 'Soil rod positions must be unique.';
+        return;
     end
-    if ~(isnumeric(surface) && isscalar(surface) && isfinite(surface))
+    % Strictly increasing: the color ramp darkens with configured order, so a
+    % descending list would contradict the shading the legend implies.
+    if numel(rod) > 1 && any(diff(rod) <= 0)
+        G.why = 'Soil rod positions must be strictly increasing.';
+        return;
+    end
+    if ~isfield(cfg, 'wx_soil_surface_rod_cm') || isempty(cfg.wx_soil_surface_rod_cm)
+        G.why = 'Soil surface rod position is not configured.';
+        return;
+    end
+    surface = cfg.wx_soil_surface_rod_cm;
+    if ~(isnumeric(surface) && isscalar(surface) && isreal(surface) && isfinite(surface))
         G.why = 'Soil surface rod position is invalid.';
         return;
     end
+    surface = double(surface);
+    depth = rod - surface;                  % below ground, positive downward
+    if any(depth <= 0)
+        G.why = 'Soil rod positions must all sit below the surface position.';
+        return;
+    end
     G.rod_cm     = rod;
-    G.surface_cm = double(surface);
-    G.depth_cm   = rod - G.surface_cm;      % below ground, positive downward
-    G.labels     = arrayfun(@(d) sprintf('%g cm', d), G.depth_cm, ...
+    G.surface_cm = surface;
+    G.depth_cm   = depth;
+    % Labels carry '~' because the surface position is surveyed only
+    % approximately, so the derived depth is approximate too.
+    G.labels     = arrayfun(@(d) sprintf('~%g cm', d), G.depth_cm, ...
                             'UniformOutput', false);
     G.ok = true;
 end
@@ -1597,6 +1625,19 @@ function c = soil_color(k)
         return;
     end
     c = ramp(mod(round(k) - 1, size(ramp, 1)) + 1, :);
+end
+
+
+function s = soil_linestyle(k)
+% Line style for the k-th soil-moisture depth. Redundant with soil_color so
+% depth stays readable in grayscale print and to color-blind viewers; cycles
+% on the same period as the color ramp, keeping style and color paired.
+    styles = {'-', '--', ':'};
+    if ~(isnumeric(k) && isscalar(k) && isfinite(k) && k >= 1)
+        s = styles{1};
+        return;
+    end
+    s = styles{mod(round(k) - 1, numel(styles)) + 1};
 end
 
 

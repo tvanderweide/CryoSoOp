@@ -210,7 +210,9 @@ function test_soil_geometry_depths_below_ground(tc)
     verifyTrue(tc, G.ok);
     verifyEqual(tc, G.rod_cm, [60 75 100]);
     verifyEqual(tc, G.depth_cm, [5 20 45], 'AbsTol', 1e-9);
-    verifyEqual(tc, G.labels, {'5 cm', '20 cm', '45 cm'});
+    % Labels carry '~': the surface position is surveyed only approximately, so
+    % the derived depth is approximate too.
+    verifyEqual(tc, G.labels, {'~5 cm', '~20 cm', '~45 cm'});
 end
 
 function test_soil_geometry_rejects_unconfigured(tc)
@@ -222,11 +224,42 @@ function test_soil_geometry_rejects_unconfigured(tc)
     verifyFalse(tc, G2.ok);
 end
 
-function test_soil_geometry_surface_defaults_to_ground(tc)
-    % No surface position configured: rod positions ARE depths below ground.
-    G = tc.TestData.U.soil_geometry(struct('wx_soil_rod_cm', [10 30]));
+function test_soil_geometry_requires_surface_position(tc)
+    % No surface position: the overlay is disabled rather than defaulting the
+    % reference plane to 0, which would relabel rod positions as depths (rod
+    % 60 cm reading as "60 cm below ground") on data that is otherwise valid.
+    U = tc.TestData.U;
+    G = U.soil_geometry(struct('wx_soil_rod_cm', [60 75]));
+    verifyFalse(tc, G.ok);
+    verifyGreaterThan(tc, strlength(G.why), 0);
+
+    % Present but unusable forms are rejected the same way.
+    verifyFalse(tc, U.soil_geometry(struct('wx_soil_rod_cm', [60 75], ...
+        'wx_soil_surface_rod_cm', [55 55])).ok);          % non-scalar
+    verifyFalse(tc, U.soil_geometry(struct('wx_soil_rod_cm', [60 75], ...
+        'wx_soil_surface_rod_cm', NaN)).ok);              % nonfinite
+    verifyFalse(tc, U.soil_geometry(struct('wx_soil_rod_cm', [60 75], ...
+        'wx_soil_surface_rod_cm', 'x')).ok);              % non-numeric
+end
+
+function test_soil_geometry_rejects_malformed_rod_lists(tc)
+    % Fail-closed on rod lists whose order or position would attach wrong depth
+    % semantics to valid data. Ordering matters because the color and line-style
+    % ramps key off configured order, so a descending list would contradict the
+    % shading the legend implies.
+    U = tc.TestData.U;
+    mk = @(rod) struct('wx_soil_rod_cm', rod, 'wx_soil_surface_rod_cm', 55);
+
+    verifyFalse(tc, U.soil_geometry(mk([60 60])).ok);     % duplicate
+    verifyFalse(tc, U.soil_geometry(mk([75 60])).ok);     % decreasing
+    verifyFalse(tc, U.soil_geometry(mk([60 100 75])).ok); % not monotonic
+    verifyFalse(tc, U.soil_geometry(mk([55 75])).ok);     % rod AT the surface
+    verifyFalse(tc, U.soil_geometry(mk([50 60])).ok);     % rod ABOVE the surface
+    verifyFalse(tc, U.soil_geometry(mk([60 75+1i])).ok);  % complex
+    % A single rod is fine — "strictly increasing" is vacuous for one element.
+    G = U.soil_geometry(mk(60));
     verifyTrue(tc, G.ok);
-    verifyEqual(tc, G.depth_cm, [10 30], 'AbsTol', 1e-9);
+    verifyEqual(tc, G.labels, {'~5 cm'});
 end
 
 
@@ -280,6 +313,61 @@ function test_soil_color_distinct_and_cyclic(tc)
     verifyEqual(tc, U.soil_color(4), c1);             % cycles
     verifyEqual(tc, U.soil_color(0), c1);             % out-of-range guard
     verifyEqual(tc, U.soil_color(NaN), c1);
+end
+
+
+function test_soil_column_names_fail_closed(tc)
+    % A pattern with no conversion spec would load ONE physical header into
+    % every slot, and duplicate expanded names would do the same. Both resolve
+    % to no soil columns rather than a misaligned partial list.
+    cols = {'SnoDAR_distance_Avg', 'SnoDAR_snow_depth_Avg', 'SoilVUE_VWC_60cm_Avg'};
+    n    = 2;
+    vals = {2*ones(n,1), ones(n,1), 0.10*ones(n,1)};
+
+    cfg = soil_cfg();  cfg.wx_soil_vwc_cols = 'SoilVUE_VWC_60cm_Avg';  % no %d
+    WX  = load_fix(tc, 'soil_nospec.dat', cols, vals, cfg);
+    verifyEqual(tc, size(WX.soil_vwc), [n 0]);
+
+    % Explicit list naming the same header twice.
+    cfg2 = soil_cfg();
+    cfg2.wx_soil_vwc_cols = {'SoilVUE_VWC_60cm_Avg', 'SoilVUE_VWC_60cm_Avg'};
+    cfg2.wx_soil_rod_cm   = [60 75];
+    WX2 = load_fix(tc, 'soil_dupname.dat', cols, vals, cfg2);
+    verifyEqual(tc, size(WX2.soil_vwc), [n 0]);
+
+    % A nonfinite rod rejects the whole list rather than silently narrowing it,
+    % which would shift the remaining columns out of step with the rod list.
+    cfg3 = soil_cfg();  cfg3.wx_soil_rod_cm = [60 NaN 100];
+    WX3 = load_fix(tc, 'soil_nanrod.dat', cols, vals, cfg3);
+    verifyEqual(tc, size(WX3.soil_vwc), [n 0]);
+end
+
+function test_soil_all_headers_absent(tc)
+    % Configured sensor, but the logger carries none of its headers: an all-NaN
+    % matrix of the configured width, so column positions still mean what the
+    % rod list says. soil_usable then reports it as nothing to draw.
+    cols = {'SnoDAR_distance_Avg', 'SnoDAR_snow_depth_Avg'};
+    n    = 3;
+    vals = {2*ones(n,1), ones(n,1)};
+    WX   = load_fix(tc, 'soil_none.dat', cols, vals, soil_cfg());
+
+    verifyEqual(tc, size(WX.soil_vwc), [n 3]);
+    verifyTrue(tc, all(isnan(WX.soil_vwc(:))));
+    verifyFalse(tc, tc.TestData.U.soil_usable(WX, soil_cfg()));
+end
+
+function test_soil_inf_normalized_to_nan(tc)
+    % Inf is not a physical VWC reading; it normalizes to NaN so downstream
+    % finite checks and the y-scale maximum cannot be poisoned by it.
+    cols = {'SnoDAR_distance_Avg', 'SnoDAR_snow_depth_Avg', ...
+            'SoilVUE_VWC_60cm_Avg', 'SoilVUE_VWC_75cm_Avg', 'SoilVUE_VWC_100cm_Avg'};
+    n    = 2;
+    vals = {2*ones(n,1), ones(n,1), [Inf; 0.10], [-Inf; 0.20], 0.30*ones(n,1)};
+    WX   = load_fix(tc, 'soil_inf.dat', cols, vals, soil_cfg());
+
+    verifyTrue(tc, isnan(WX.soil_vwc(1, 1)));
+    verifyTrue(tc, isnan(WX.soil_vwc(1, 2)));
+    verifyEqual(tc, WX.soil_vwc(2, :), [0.10 0.20 0.30], 'AbsTol', 1e-9);
 end
 
 
@@ -378,6 +466,103 @@ function test_soil_overlay_geometry(tc)
 end
 
 
+% --------------------------------------------------- viewer: production render
+
+function test_soil_overlay_renders_from_production_path(tc)
+    % Drive the real renderer and find the overlay BY TAG: asserts what the
+    % surrogate-axes contract above cannot — that the production path builds
+    % the tagged axes at all, with non-pickable lines, depth-ordered colors and
+    % redundant line styles, '~'-prefixed legend labels, and a floor at 0 (the
+    % air/snow segments' exact zeros must read as the scale bottom).
+    V = render_candidates(tc, @(V) []);
+    cleanup = onCleanup(@() delete(V.fig));
+
+    axV = findobj(V.panel, 'Type', 'axes', 'Tag', 'soop_soil_vwc');
+    verifyNumElements(tc, axV, 1);
+    verifyEqual(tc, axV.Color, 'none');
+    verifyEqual(tc, axV.YAxisLocation, 'right');
+    verifyEqual(tc, axV.YLim(1), 0);
+    verifyTrue(tc, contains(axV.YLabel.String, 'VWC'));
+
+    % Lines are in configured (shallow -> deep) order, non-pickable, and carry
+    % both a distinct color and a distinct style.
+    ln = flipud(findobj(axV, 'Type', 'line'));   % findobj returns newest first
+    verifyNumElements(tc, ln, 3);
+    U = tc.TestData.U;
+    for k = 1:3
+        verifyEqual(tc, ln(k).Color, U.soil_color(k), 'AbsTol', 1e-12);
+        verifyEqual(tc, ln(k).LineStyle, U.soil_linestyle(k));
+        verifyEqual(tc, char(ln(k).PickableParts), 'none');
+        verifyFalse(tc, logical(ln(k).HitTest));
+    end
+    verifyNotEqual(tc, ln(1).LineStyle, ln(2).LineStyle);
+    verifyNotEqual(tc, ln(2).LineStyle, ln(3).LineStyle);
+
+    % Legend labels are depth below ground, approximate.
+    lg = findobj(V.panel, 'Type', 'legend');
+    soil_lg = [];
+    for k = 1:numel(lg)
+        if isequal(ancestor(lg(k).PlotChildren(1), 'axes'), axV)
+            soil_lg = lg(k);
+        end
+    end
+    verifyNotEmpty(tc, soil_lg);
+    verifyEqual(tc, cellstr(soil_lg.String(:))', {'~5 cm', '~20 cm', '~45 cm'});
+end
+
+function test_soil_overlay_style_scales_exactly_once(tc)
+    % The soil lines are created after the shared style pass, so they are style
+    % -applied separately. Line x must multiply their base width ONE time.
+    V1 = render_candidates(tc, @(V) []);
+    c1 = onCleanup(@() delete(V1.fig));
+    w1 = base_widths(tc, V1);
+
+    V2 = render_candidates(tc, @(V) set(V.sp_linew, 'Value', 3));
+    c2 = onCleanup(@() delete(V2.fig));
+    w2 = base_widths(tc, V2);
+
+    verifyEqual(tc, w2, 3 * w1, 'AbsTol', 1e-12);
+end
+
+function test_soil_overlay_exports(tc)
+    % The overlay must survive the viewer's real export path (Export PNG uses
+    % exportgraphics on the panel), not just on-screen rendering.
+    V = render_candidates(tc, @(V) []);
+    cleanup = onCleanup(@() delete(V.fig));
+    png = fullfile(tc.TestData.dir, 'soil_export.png');
+
+    exportgraphics(V.panel, png, 'Resolution', 300);
+    verifyTrue(tc, isfile(png));
+    verifyGreaterThan(tc, dir(png).bytes, 0);
+end
+
+function test_all_nonfinite_phase_draws_nothing_without_error(tc)
+    % aggregate drops nonfinite rows, so an all-NaN displayed phase leaves
+    % plot_series a ZERO-ELEMENT handle. Every point-color mode must degrade to
+    % "draws no phase" rather than erroring on dot-assignment, and the weather
+    % overlays must still render.
+    for mode = {'none', 'hour', 'snr'}
+        V = render_candidates(tc, @(V) set_color_mode(V, mode{1}), true);
+        cleanup = onCleanup(@() delete(V.fig));
+        % The SnowTemp subplot and its soil overlay still drew.
+        verifyNumElements(tc, ...
+            findobj(V.panel, 'Type', 'axes', 'Tag', 'soop_soil_vwc'), 1);
+    end
+end
+
+function set_color_mode(V, mode)
+    V.cb_hourcolor.Value = strcmp(mode, 'hour');
+    V.cb_snrcolor.Value  = strcmp(mode, 'snr');
+end
+
+function w = base_widths(tc, V)
+    axV = findobj(V.panel, 'Type', 'axes', 'Tag', 'soop_soil_vwc');
+    verifyNumElements(tc, axV, 1);
+    ln  = flipud(findobj(axV, 'Type', 'line'));
+    w   = arrayfun(@(h) h.LineWidth, ln);
+end
+
+
 % ------------------------------------------------------------- local fixtures
 
 function V = build_layout(tc)
@@ -405,6 +590,43 @@ function V = build_layout(tc)
     V.CB = soop_viewer_callbacks();
     [V.PLOT_INFO, V.CAP_PATTERNS] = soop_viewer_catalog(cfg);
     soop_viewer_layout(V);
+end
+
+function V = render_candidates(tc, tweak, nonfinite_phase)
+% Build the real viewer, load a one-day candidates + weather fixture, apply the
+% caller's widget tweak, and run the production renderer. Returns the state so
+% the caller can inspect what was actually drawn. Caller deletes V.fig.
+    V = build_layout(tc);
+    d0 = tc.TestData.t0;
+    ph = [10; -20; 35];
+    if nargin >= 3 && nonfinite_phase
+        ph = [NaN; NaN; Inf];
+    end
+    V.CAND = table(d0 + hours([2; 9; 16]), "cap" + string((1:3)'), ...
+                   [12; 20; 40], ph, ...
+        'VariableNames', {'timestamp', 'base_name', 'snr_db', 'corr_41622'});
+
+    % 15-min weather day: depth, temperatures, SWE, a DTC profile, and three
+    % soil rods. Rod 1 is all zeros — the air/snow segment reading its real
+    % 0.000 m^3/m^3 — so the y floor and the ordering assertions both bite.
+    tw = (d0 : minutes(15) : d0 + hours(23.75))';
+    nw = numel(tw);
+    V.cfg.dtc_depth_cm = [-45 -20 -5 5 20 40];
+    V.WX = table(tw, 0.8 + 0.001 * (1:nw)', -4 * ones(nw, 1), ...
+        -3 * ones(nw, 1), 200 * ones(nw, 1), ...
+        repmat([-6 -4 -2 -1 -0.5 -0.2], nw, 1), ...
+        [zeros(nw, 1), 0.18 + 0.001 * (1:nw)', 0.25 * ones(nw, 1)], ...
+        'VariableNames', {'timestamp', 'depth_m', 'airtc_c', 'temp_c', ...
+                          'swe_mm', 'dtc_c', 'soil_vwc'});
+
+    V.dp1.Value = d0;  V.dp2.Value = d0;
+    V.cb_snowtemp.Value = true;
+    V.cb_soilvwc.Value  = true;
+    V.cb_depth.Value    = true;
+    V.cb_swe.Value      = true;
+    V.cb_airtc.Value    = true;
+    tweak(V);
+    soop_viewer_render_l2(V, ['L2: Candidates ' char(8212) ' MUOS-5 (41622)']);
 end
 
 function WX = soil_wx(tc)

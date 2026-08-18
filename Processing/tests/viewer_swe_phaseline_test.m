@@ -314,6 +314,56 @@ function test_wx_axes_plan_matrix(tc)
     verifyLessThanOrEqual(tc, P.ax_pos(1) + P.ax_pos(3) + P.dtc_cb_gap + 0.015, 1);
 end
 
+function test_wx_axes_plan_no_combination_overflows(tc)
+    % Full cross-product: no combination of overlays may push an axes, a ruler
+    % spine, or the DTC colorbar past the panel edge. Every ruler also has to
+    % land in a slot of its own, since two rulers at one x would overprint.
+    U = tc.TestData.U;
+    for dep = [false true]
+      for swe = [false true]
+        for tmp = [false true]
+          for hr = [false true]
+            for soil = [false true]
+                P = U.wx_axes_plan(dep, swe, tmp, hr, soil);
+                lbl = sprintf('dep=%d swe=%d tmp=%d hour=%d soil=%d', ...
+                              dep, swe, tmp, hr, soil);
+                verifyGreaterThan(tc, P.ax_pos(3), 0, lbl);
+                verifyLessThanOrEqual(tc, P.ax_pos(1) + P.ax_pos(3), 1, lbl);
+
+                % Phase-axes rulers: SWE (inner) then temperatures (outer).
+                spines = [];
+                if P.swe_ovl, spines(end+1) = P.swe_w; end %#ok<AGROW>
+                if tmp,       spines(end+1) = P.tmp_w; end %#ok<AGROW>
+                for s = spines
+                    verifyLessThanOrEqual(tc, P.ax_pos(1) + s, 1, lbl);
+                end
+                if numel(spines) > 1
+                    verifyGreaterThan(tc, abs(diff(spines)), 0, lbl);
+                end
+
+                % SnowTemp axes: soil ruler, then the temperature colorbar.
+                if soil
+                    verifyLessThanOrEqual(tc, P.ax_pos(1) + P.soil_w, 1, lbl);
+                    % Colorbar must start beyond the soil ruler's spine.
+                    verifyGreaterThan(tc, P.ax_pos(3) + P.dtc_cb_gap, P.soil_w, lbl);
+                else
+                    verifyTrue(tc, isempty(P.soil_w), lbl);
+                end
+                verifyLessThanOrEqual(tc, ...
+                    P.ax_pos(1) + P.ax_pos(3) + P.dtc_cb_gap + 0.015, 1, lbl);
+
+                % Hour/SNR strip sits under the axes, inside the panel.
+                if hr
+                    verifyLessThanOrEqual(tc, P.cb_pos(1) + P.cb_pos(3), 1, lbl);
+                    verifyGreaterThan(tc, P.ax_pos(2), P.cb_pos(2), lbl);
+                end
+            end
+          end
+        end
+      end
+    end
+end
+
 function test_overlay_colorbar_alignment(tc)
     % Combined graphics contract built FROM the production plan: with the
     % hour colorbar pinned to its reserved strip and ax restored, the main

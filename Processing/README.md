@@ -284,9 +284,13 @@ The side-panel `SnowTemp - SoilMoisture` option, enabled only while `SnowTemp`
 is on and the site configures SoilVUE rod geometry (`wx_soil_vwc_cols`,
 `wx_soil_rod_cm`, `wx_soil_surface_rod_cm`), overlays volumetric water content
 in m³/m³ on the thermograph axes with its own brown right ruler — one line per
-configured rod position, shaded light-to-dark with increasing depth. Legend
+configured rod position, shaded light-to-dark and styled solid/dashed/dotted
+with increasing depth so the traces stay separable in grayscale print. Legend
 labels are depth **below ground** (rod position minus the surface offset), not
-the rod positions the logger headers name. The scale is pinned at 0 because rod
+the rod positions the logger headers name, and carry a `~` because the surface
+position is surveyed only approximately. The rod list must be strictly
+increasing and sit entirely below a configured surface position; anything else
+disables the overlay rather than risk mislabelling depths. The scale is pinned at 0 because rod
 segments standing in air or snow fall below the sensor's calibrated
 permittivity range and return exactly 0 m³/m³ — a valid reading, not a gap —
 which is why only the buried rod positions are worth configuring.

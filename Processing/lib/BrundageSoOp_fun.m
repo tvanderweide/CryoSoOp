@@ -701,6 +701,12 @@ function names = soil_column_names(cfg)
 % instead of shifting its neighbours — unlike the DTC pattern, which expands
 % sequentially until a header is missing. Returns empty when the sensor is not
 % configured: rod geometry is site-specific and is never guessed.
+%
+% FAIL-CLOSED, like soil_geometry: a nonfinite rod, a pattern carrying no
+% conversion spec, or two rods expanding to the same header all return empty
+% rather than a partial list. Silently dropping a slot would shift the
+% remaining columns out of step with cfg.wx_soil_rod_cm, which is what carries
+% the depth labels — mislabelling every rod after the gap.
     names = {};
     if ~isfield(cfg, 'wx_soil_vwc_cols') || isempty(cfg.wx_soil_vwc_cols)
         return;
@@ -708,12 +714,24 @@ function names = soil_column_names(cfg)
     spec = cfg.wx_soil_vwc_cols;
     if ~(ischar(spec) || (isstring(spec) && isscalar(spec)))
         names = cellstr(spec);      % explicit ordered header list
+        names = names(:)';
+        if numel(unique(names)) ~= numel(names), names = {}; end
         return;
     end
-    if ~isfield(cfg, 'wx_soil_rod_cm') || isempty(cfg.wx_soil_rod_cm)
+    if ~isfield(cfg, 'wx_soil_rod_cm') || isempty(cfg.wx_soil_rod_cm) || ...
+            ~isnumeric(cfg.wx_soil_rod_cm)
         return;                     % pattern with no rod positions to fill it
     end
-    rods = double(cfg.wx_soil_rod_cm(:))';
-    rods = rods(isfinite(rods));
-    names = arrayfun(@(r) sprintf(char(spec), r), rods, 'UniformOutput', false);
+    rods = cfg.wx_soil_rod_cm(:)';
+    if ~isreal(rods) || ~all(isfinite(rods))
+        return;
+    end
+    spec = char(spec);
+    % A pattern with no conversion spec expands to the SAME header for every
+    % rod, loading one physical column into differently labelled slots.
+    if isempty(regexp(spec, '%[-+ #0-9.]*[diufg]', 'once'))
+        return;
+    end
+    names = arrayfun(@(r) sprintf(spec, r), double(rods), 'UniformOutput', false);
+    if numel(unique(names)) ~= numel(names), names = {}; end
 end
