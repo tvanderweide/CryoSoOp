@@ -98,24 +98,71 @@ function test_mask_length_matches_input(tc)
     end
 end
 
-%% BrundageSoOp.m gating enable guard
+%% gating_apply_config — the production cfg path used by BrundageSoOp.m
 
-% Mirrors the predicate in BrundageSoOp.m. jsondecode maps JSON null to [],
-% so the ~isempty term is what makes a null toggle read as "off".
-function tf = gating_enabled(site)
-    tf = isfield(site, 'gating') && ~isempty(site.gating) && ...
-         isfield(site.gating, 'toggle') && isequal(site.gating.toggle, true);
+function gated = is_gated(cfg)
+    gated = isfield(cfg, 'gating_toggle') && cfg.gating_toggle;
 end
 
-function test_absent_or_off_gating_degrades(tc)
-    verifyFalse(tc, gating_enabled(struct('site', struct())), 'no gating block');
-    verifyFalse(tc, gating_enabled(struct('gating', [])),           'gating null');
-    verifyFalse(tc, gating_enabled(struct('gating', struct())),     'no toggle field');
-    verifyFalse(tc, gating_enabled(struct('gating', struct('toggle', false))), 'toggle false');
-    verifyFalse(tc, gating_enabled(struct('gating', struct('toggle', []))),    'toggle null');
-    verifyFalse(tc, gating_enabled(struct('gating', struct('toggle', 'true'))), 'toggle string');
-    verifyTrue(tc,  gating_enabled(struct('gating', struct('toggle', true))),  'toggle true');
-    verifyTrue(tc,  gating_enabled(struct('gating', struct('toggle', 1))),     'toggle JSON 1');
+function test_absent_or_off_gating_leaves_fields_unset(tc)
+    base = struct('fs', 20e6);
+    off = { struct('site', struct()),                        'no gating block'
+            struct('gating', []),                            'gating null'
+            struct('gating', struct()),                      'no toggle field'
+            struct('gating', struct('toggle', false)),       'toggle false'
+            struct('gating', struct('toggle', [])),          'toggle null'
+            struct('gating', struct('toggle', 'true')),      'toggle string' };
+    for k = 1:size(off, 1)
+        cfg = gating_apply_config(base, off{k, 1});
+        verifyFalse(tc, is_gated(cfg), off{k, 2});
+        verifyFalse(tc, isfield(cfg, 'gating_mode'), off{k, 2});
+        verifyEqual(tc, cfg.fs, base.fs, 'unrelated cfg fields survive');
+    end
+end
+
+function test_enabled_gating_sets_defaults(tc)
+    cfg = gating_apply_config(struct('fs', 20e6), struct('gating', struct('toggle', true)));
+    verifyTrue(tc, is_gated(cfg));
+    verifyEqual(tc, cfg.gating_mode, 'quiet');
+    verifyEqual(tc, cfg.gating_window_ms, 0.5);
+    verifyEqual(tc, cfg.gating_transition_ms, 2.0);
+    % JSON 1 enables just as a JSON boolean does.
+    cfg1 = gating_apply_config(struct(), struct('gating', struct('toggle', 1)));
+    verifyTrue(tc, is_gated(cfg1), 'toggle JSON 1');
+end
+
+function test_null_subfields_fall_back_to_defaults(tc)
+    % jsondecode maps JSON null to []; those entries must not overwrite defaults.
+    site = struct('gating', struct('toggle', true, 'mode', [], ...
+                                   'window_ms', [], 'transition_ms', 3.5));
+    cfg = gating_apply_config(struct(), site);
+    verifyEqual(tc, cfg.gating_mode, 'quiet');
+    verifyEqual(tc, cfg.gating_window_ms, 0.5);
+    verifyEqual(tc, cfg.gating_transition_ms, 3.5, 'explicit value wins');
+end
+
+function test_invalid_mode_fails_closed(tc)
+    site = struct('gating', struct('toggle', true, 'mode', 'sideways'));
+    verifyError(tc, @() gating_apply_config(struct(), site), 'BrundageSoOp:gatingMode');
+end
+
+function test_rerun_with_gating_off_clears_stale_fields(tc)
+    % BrundageSoOp is a script and reuses the base workspace: a run with gating
+    % on must not leave the consumers gating after the operator switches it off.
+    on  = gating_apply_config(struct('fs', 20e6), ...
+              struct('gating', struct('toggle', true, 'mode', 'loud', ...
+                                      'window_ms', 9, 'transition_ms', 9)));
+    verifyTrue(tc, is_gated(on), 'precondition: first run gates');
+
+    off = gating_apply_config(on, struct('gating', struct('toggle', false)));
+    verifyFalse(tc, is_gated(off), 'stale gating_toggle must not survive');
+    for f = {'gating_toggle','gating_mode','gating_window_ms','gating_transition_ms'}
+        verifyFalse(tc, isfield(off, f{1}), ['stale ' f{1} ' must be removed']);
+    end
+
+    % Same for a config that drops the gating block entirely.
+    gone = gating_apply_config(on, struct('site', struct()));
+    verifyFalse(tc, is_gated(gone), 'stale toggle must not survive a removed block');
 end
 
 %% Shipped site configs

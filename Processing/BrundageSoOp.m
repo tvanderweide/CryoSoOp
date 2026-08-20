@@ -52,22 +52,7 @@ cfg.T_load_K     = site.sdr.T_load_K;      % calibration load temperature (K)
 % captures carry less total power than ungated ones. An absent "gating" block,
 % or "toggle": false, leaves every cfg.gating_* field UNSET; each consumer's
 % isfield(cfg, 'gating_toggle') test then processes ungated.
-if isfield(site, 'gating') && ~isempty(site.gating) && ...
-        isfield(site.gating, 'toggle') && isequal(site.gating.toggle, true)
-    cfg.gating_toggle        = true;
-    cfg.gating_mode          = 'quiet';  % 'quiet' keeps MUOS, 'loud' keeps RFI
-    cfg.gating_window_ms     = 0.5;      % rolling-power window (ms)
-    cfg.gating_transition_ms = 2.0;      % blanked each side of a transition (ms)
-    gate_fields = {'mode', 'window_ms', 'transition_ms'};
-    for gate_k = 1:numel(gate_fields)
-        gate_f = gate_fields{gate_k};
-        if isfield(site.gating, gate_f) && ~isempty(site.gating.(gate_f))
-            cfg.(['gating_' gate_f]) = site.gating.(gate_f);
-        end
-    end
-    % Validated once here so no consumer has to invent a fallback.
-    cfg.gating_mode = gating_mode_check(cfg.gating_mode);
-end
+cfg = gating_apply_config(cfg, site);
 
 % --- L2 geometric correction (site geometry from site_config.json) ---
 % capture_tz is the time zone used in capture filename timestamps.
