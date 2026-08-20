@@ -120,14 +120,43 @@ diagnostics of the two effects rather than corrections.
 | `cfg.site_alt_m` | `2247.113` m, WGS84 ellipsoidal | antenna phase center = surveyed ground point 2241.017 m + 6.096 m tower; <0.001 deg effect at GEO range |
 | `cfg.capture_tz` | `'America/Boise'` (legacy season) / `'UTC'` (UTC-era) | Timebase of the capture filename stamps. Legacy 2025-26 data used the Pi's LOCAL clock (`'America/Boise'`, VERIFIED 2026-06-12 via `timedatectl`; season spans the Mar 8 MST->MDT change, `datetime` TimeZone conversion in compute_L2 / compare_sat_candidates handles both offsets). cryosoop builds from 2026-07 on stamp UTC in code — set `'UTC'` (the conversion becomes an exact identity), and compute_L1 hard-errors if a UTC-marked run (summary.json `wall_clock: "UTC"`) is processed under a local zone. Never mix the two eras under one data root. If absent, timestamps are assumed already UTC |
 
-### RFI pulse removal (CSSL-specific)
+### Time-domain RFI gating (CSSL pulsed RFI)
 
-| Field | Default | Notes |
+Configured in the `"gating"` block of `site_config.json` (`toggle`, `mode`, `window_ms`,
+`transition_ms` — unprefixed, the block namespaces them). `BrundageSoOp.m` copies them to the
+`cfg` fields below and validates `mode`. **When the block is absent or `"toggle"` is false, none
+of the `cfg.gating_*` fields are set** and `compute_L1`, `compute_rfi_spectrum`, and the viewer's
+raw views all run ungated.
+
+| Field | Entry value | Notes |
 |---|---|---|
-| `cfg.gating_toggle` | `true / false` | Toggles whether pipeline finds regular pulses of loud RFI present at CSSL and isolates either quiet (MUOS) or loud (RFI) data for processing |
-| `cfg.gating_mode` | `'quiet' ('loud')` | If set to `'quiet'`, quiet segments without interference will be isolated and processed. If `'loud'`, then RFI signal will be isolated and processed. Default `'quiet'` |
-| `cfg.gating_window_ms` | `0.5` | Length of sliding window which averages the power of the signal in the time domain and compares to a threshold value to determine if a segment is quiet or loud. Default 0.5 ms|
-| `cfg.gating_transition_ms` | `2.0` | Length of segment in time domain which is removed at transition periods between loud and quiet data to preserve signal. Default 2.0 ms|
+| `cfg.gating_toggle` | `true` only when `"gating"."toggle"` is true; otherwise UNSET | the single predicate every consumer tests with `isfield(cfg, 'gating_toggle')` |
+| `cfg.gating_mode` | `'quiet'` | `'quiet'` keeps the MUOS intervals, `'loud'` keeps the RFI intervals. Any other value is a hard error (`BrundageSoOp:gatingMode`) at config load. There is no `'none'` mode — use `"toggle": false` |
+| `cfg.gating_window_ms` | `0.5` ms | rolling mean-power window; the threshold is the midpoint of that window's P10/P90 |
+| `cfg.gating_transition_ms` | `2.0` ms | blanked at BOTH capture ends and on EACH side of every internal transition. A capture with one transition loses `4 x transition_ms`; a capture with none still loses `2 x transition_ms` |
+| `cfg.rfi_min_segments` | `16` | `compute_rfi_spectrum` warns (`BrundageSoOp:rfiLowSegmentCount`) below this season segment total |
+
+Masked samples are **zeroed, not removed**: capture length is preserved, and the absolute power
+columns (`pow_ch0_fd`, `pow_ch1_fd` and their `_muos` variants) scale with the surviving duty
+cycle. `compute_rfi_spectrum` instead discards any segment that is not 100% active, and reads
+`128*rfi_seg_len` samples per file (rather than `16*`) while gating is on — roughly an 8x rise in
+peak per-worker memory, since two complex-double channel buffers of that length are live per
+`parfor` worker. Override with `cfg.rfi_read_samples`.
+
+**Enablement conditions — read before setting `"toggle": true` for science products:**
+
+- Gated L1 power columns are not duty-cycle corrected, but the viewer's `Raw: PSD` view *is*
+  (it rescales by the nonzero sample fraction). Viewer PSD levels and L1 power columns are
+  therefore not directly comparable while gating is on. `compute_sigma0` consumes those power
+  columns for direct-referenced calibration: ratios cancel the duty factor, absolute uses do
+  not. **Do not enable gating for production sigma0, or interpret absolute gated powers, until
+  this normalization is resolved.**
+- The threshold is always the P10/P90 midpoint, so it assumes bimodal power. On data without
+  pulsed RFI it splits a flat distribution at its own midpoint and rejects most of the capture.
+  Enable only at sites with the CSSL-style periodic pulses.
+- With `transition_ms = 2.0` and short loud bursts, the guard bands can consume every loud run,
+  yielding an all-false mask. **Do not use `mode = 'loud'` without a preflight check of the
+  quiet/loud/dropped sample fractions**; reduce `transition_ms` when working in that mode.
 
 ### Weather overlay (viewer only)
 

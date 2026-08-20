@@ -91,10 +91,14 @@ site's copy under another name). Checklist:
      IS UTC−7). When set, weather timestamps are converted into the capture
      timebase so the viewer overlay aligns; when absent, they pass through
      unconverted (the legacy-season behavior).
-   - `gating`: set `"toggle": = true` if using CSSL data with ~100ms periodic RFI
-     pulses. Pipeline will adapt to process the quiet MUOS data by default,
-     or process the loud RFI data if mode = `'loud'`. Can change window and
-     transition band length if needed.
+   - `gating` (optional): set `"toggle": true` at sites with the ~100 ms periodic
+     RFI pulses seen at CSSL. `"mode"` selects which intervals are kept —
+     `"quiet"` (the MUOS signal, the default) or `"loud"` (the RFI itself).
+     `"window_ms"` is the rolling mean-power window; `"transition_ms"` is the
+     guard band blanked at both capture ends and each side of every internal
+     transition. An absent block, or `"toggle": false`, processes ungated.
+     Read the enablement conditions in `docs/config-reference.md` before
+     turning this on for science products.
 2. **Capture timezone** — `site.capture_tz` names the timebase of the
    capture filename stamps. cryosoop builds from 2026-07 on stamp **UTC in
    code** (independent of the Pi's OS timezone), so for new deployments set
