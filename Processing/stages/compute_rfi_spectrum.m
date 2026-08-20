@@ -1,7 +1,8 @@
 function compute_rfi_spectrum(cfg)
 % Aggregate season-wide RFI spectra and propose frequency-domain excision bands.
 % Produces separate products for Signal, NL (noise+load), and L (load-only).
-% Adapts to CSSL RFI pulses if present, to only calculate RFI for quiet data.
+% Skips segments overlapping gated-out intervals when time-domain gating is
+% enabled (Signal dataset only).
 %
 % Per-bin diagnostics are mean PSD (dB), occupancy above the movmedian envelope,
 % spectral kurtosis SK=(M+1)/(M-1)*(M*S2/S1^2-1), and ch0xch1 coherence
@@ -26,14 +27,17 @@ function compute_rfi_spectrum(cfg)
     ap.excess_db = getdef(cfg, 'rfi_excess_db',    6);      % per-capture occupancy excess (diag)
     ap.max_caps  = getdef(cfg, 'rfi_max_captures', 500);    % even season subsample
     ap.base_khz  = getdef(cfg, 'rfi_env_khz', 1000);        % occupancy baseline width = the shared PSD-envelope width (cfg.rfi_env_khz)
-    % Gating:
-    ap.toggle    = getdef(cfg, 'toggle');
-    ap.mode      = getdef(cfg, 'mode');
-    ap.window_ms = getdef(cfg, 'window_ms');
-    ap.transition_ms  = getdef(cfg, 'transition_ms');
-    % If gating is enabled, scale up the samples read per file to ensure that
-    % after masking RFI bursts, there are still adequate segments to average.
-    if ap.toggle
+    ap.min_segs  = getdef(cfg, 'rfi_min_segments', 16);     % warn below this season segment total
+    % Time-domain gating (pulsed CSSL RFI; off unless site_config enables it):
+    ap.gating_toggle        = getdef(cfg, 'gating_toggle',        false);
+    ap.gating_mode          = getdef(cfg, 'gating_mode',          'quiet');
+    ap.gating_window_ms     = getdef(cfg, 'gating_window_ms',     0.5);  % ms
+    ap.gating_transition_ms = getdef(cfg, 'gating_transition_ms', 2.0);  % ms
+    % Gating discards whole segments, so read more samples per file when it is
+    % on to leave enough surviving segments for a stable season average. This
+    % raises peak per-worker memory ~8x: two complex-double channel buffers of
+    % n_read samples are live per parfor worker (cfg.rfi_read_samples overrides).
+    if ap.gating_toggle
         ap.n_read = getdef(cfg, 'rfi_read_samples', 128 * ap.seg_len);
     else
         ap.n_read = getdef(cfg, 'rfi_read_samples', 16 * ap.seg_len);
@@ -115,16 +119,19 @@ function aggregate_dataset(ds, bp, ap)
     % real stat (7) plus complex X01 (2x), e.g. seg_len=2^16 (nbins) and
     % chunk_sz=64 is ~0.3 GB — vs ~2.3 GB to hold all rfi_max_captures (500)
     % captures at once.
-    % Adapts to account for CSSL RFI pulse gating if needed.
+    % The chunk-buffer bound above covers the output accumulators only; with
+    % gating on, each worker also holds two n_read complex-double channel
+    % buffers (see ap.n_read).
     files = ch0_files;  bnames = bases;
     n_read = ap.n_read;  excess_db = bp.excess_db;  base_khz = ap.base_khz;  df = ap.df;
+    % NL/L captures are load states with no MUOS signal, so gating applies to
+    % the Signal dataset only. Read-only broadcast variable into the parfor.
     gate_cfg = struct(...
-        'enable', ap.toggle, ...
-        'mode', ap.mode, ...
-        'window_ms', ap.window_ms, ...
-        'transition_ms', ap.transition_ms, ...
-        'fs', ap.fs...
-        );
+        'enable',        ap.gating_toggle && strcmp(ds.name, 'Signal'), ...
+        'mode',          ap.gating_mode, ...
+        'window_ms',     ap.gating_window_ms, ...
+        'transition_ms', ap.gating_transition_ms, ...
+        'fs',            ap.fs);
     chunk_sz = min(nC, 64);
     for c0 = 1:chunk_sz:nC
         cidx = c0:min(c0 + chunk_sz - 1, nC);
@@ -156,11 +163,13 @@ function aggregate_dataset(ds, bp, ap)
         return;
     end
     fprintf('[rfi:%s] Aggregated %d capture(s), %d segment(s).\n', ds.name, Ncap, Mtot);
-    % Warn if total segments are insufficient down the line (relevant for
-    % CSSL RFI gating)
-    if Mtot < 16
-        warning('RFI:LowSegmentCount', ...
-            'Total aggregated segments (%d) is very low. Noise variance may cause false RFI band proposals.', Mtot);
+    % Too few segments leaves the season average noise-dominated; gating makes
+    % this reachable by discarding partially-masked segments.
+    if Mtot < ap.min_segs
+        warning('BrundageSoOp:rfiLowSegmentCount', ...
+                ['[rfi:%s] Only %d segment(s) aggregated (cfg.rfi_min_segments = %d). ' ...
+                 'Noise variance at this count can produce false RFI band proposals.'], ...
+                ds.name, Mtot, ap.min_segs);
     end
 
     % --- Derived spectra (fftshifted; RF frequency axis) ---
@@ -243,7 +252,8 @@ end
 function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, excess_db, base_khz, df, gate_cfg)
 % Per-capture spectral accumulation (fftshifted bin order). Returns zeros and
 % ms=0 if the pair is missing/short so it contributes nothing to the season sums.
-% Adapts to account for CSSL RFI pulse gating if needed.
+% With gating enabled, only fully-active segments are accumulated, so ms counts
+% surviving segments rather than all segments in the capture.
     a0=zeros(L,1); a1=zeros(L,1); q0=zeros(L,1); q1=zeros(L,1);
     x01=complex(zeros(L,1)); o0=zeros(L,1); o1=zeros(L,1); ms=0;
 
@@ -257,10 +267,12 @@ function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, exc
     if n < L, return; end
     ch0 = ch0(1:n);  ch1 = ch1(1:n);
 
-    % Gating mask eval (CSSL RFI)
-    is_calib = contains(string(base), {'_L_', '_NL_', '_Load_'}, 'IgnoreCase', true);
-    if gate_cfg.enable && ~is_calib
-        [quiet_mask, loud_mask] = get_gating_masks(ch0, gate_cfg.fs, gate_cfg.window_ms, gate_cfg.transition_ms);
+    % Time-domain gating of pulsed CSSL RFI. gate_cfg.enable already restricts
+    % this to the Signal dataset, and gate_cfg.mode is validated at config load.
+    if gate_cfg.enable
+        [quiet_mask, loud_mask] = get_gating_masks(ch0, gate_cfg.fs, ...
+                                                   gate_cfg.window_ms, ...
+                                                   gate_cfg.transition_ms);
         if strcmpi(gate_cfg.mode, 'loud')
             active_mask = loud_mask;
         else

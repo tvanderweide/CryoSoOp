@@ -44,11 +44,30 @@ cfg.freq_hz      = site.sdr.freq_hz;       % center frequency (Hz)
 cfg.tower_h_m    = site.site.tower_h_m;    % tower height (m)
 cfg.T_load_K     = site.sdr.T_load_K;      % calibration load temperature (K)
 
-% Gating settings defined in site_config.json, see docs/config-reference.md.
-cfg.toggle        = site.gating.toggle;         % if gating for CSSL RFI should occur
-cfg.mode          = site.gating.mode;           % type of data to save
-cfg.window_ms     = site.gating.window_ms;      % length of rolling window (ms)
-cfg.transition_ms = site.gating.transition_ms;  % length of transition band (ms)
+% --- Time-domain RFI gating (site.gating; CSSL pulsed RFI) ---
+% get_gating_masks splits each capture into loud (RFI) and quiet (MUOS) runs
+% using a rolling-power threshold, and blanks gating_transition_ms at both
+% capture ends and on each side of every internal transition. The selected run
+% type is kept and the rest of the capture is ZEROED, not removed, so gated
+% captures carry less total power than ungated ones. An absent "gating" block,
+% or "toggle": false, leaves every cfg.gating_* field UNSET; each consumer's
+% isfield(cfg, 'gating_toggle') test then processes ungated.
+if isfield(site, 'gating') && ~isempty(site.gating) && ...
+        isfield(site.gating, 'toggle') && isequal(site.gating.toggle, true)
+    cfg.gating_toggle        = true;
+    cfg.gating_mode          = 'quiet';  % 'quiet' keeps MUOS, 'loud' keeps RFI
+    cfg.gating_window_ms     = 0.5;      % rolling-power window (ms)
+    cfg.gating_transition_ms = 2.0;      % blanked each side of a transition (ms)
+    gate_fields = {'mode', 'window_ms', 'transition_ms'};
+    for gate_k = 1:numel(gate_fields)
+        gate_f = gate_fields{gate_k};
+        if isfield(site.gating, gate_f) && ~isempty(site.gating.(gate_f))
+            cfg.(['gating_' gate_f]) = site.gating.(gate_f);
+        end
+    end
+    % Validated once here so no consumer has to invent a fallback.
+    cfg.gating_mode = gating_mode_check(cfg.gating_mode);
+end
 
 % --- L2 geometric correction (site geometry from site_config.json) ---
 % capture_tz is the time zone used in capture filename timestamps.

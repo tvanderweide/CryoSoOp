@@ -409,23 +409,22 @@ function [ch0, ch1] = rr_load_capture(V, base)
     n = min(numel(ch0), numel(ch1));
     ch0 = ch0(1:n);  ch1 = ch1(1:n);
 
-    % Time-domain gating for CSSL RFI pulses
-    % Temporal gating not applied to noise or load
-    is_calib = contains(string(base), {'_L_', '_NL_', '_Load_'}, 'IgnoreCase', true);
-    if isfield(cfg, 'toggle') && cfg.toggle && ~is_calib
-        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, cfg.window_ms, cfg.transition_ms);
-        if isfield(cfg, 'mode')
-            gate_mode = cfg.mode;
+    % Time-domain gating of pulsed CSSL RFI — same mask and mode selection as
+    % compute_L1, so a raw view matches the product it explains. NL/L
+    % calibration captures are load states with no MUOS signal and stay ungated.
+    % cfgdef supplies defaults for a minimal cfg from a programmatic launch.
+    is_calib = startsWith(string(base), ["UHF__NL_", "UHF__L_"]);
+    if isfield(cfg, 'gating_toggle') && cfg.gating_toggle && ~is_calib
+        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, ...
+            V.U.cfgdef(V, 'gating_window_ms',     0.5), ...
+            V.U.cfgdef(V, 'gating_transition_ms', 2.0));
+        if strcmpi(V.U.cfgdef(V, 'gating_mode', 'quiet'), 'loud')
+            active_mask = loud_mask;
+        else
+            active_mask = quiet_mask;
         end
-
-        switch lower(gate_mode)
-            case 'quiet'
-                ch0 = ch0 .* quiet_mask;
-                ch1 = ch1 .* quiet_mask;
-            case 'loud'
-                ch0 = ch0 .* loud_mask;
-                ch1 = ch1 .* loud_mask;
-        end
+        ch0 = ch0 .* active_mask;
+        ch1 = ch1 .* active_mask;
     end
 end
 
