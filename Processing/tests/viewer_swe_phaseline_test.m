@@ -830,6 +830,15 @@ function test_site_configs_parse(tc)
         else
             verifyFalse(tc, wired, 'CSSL nulls must map to loader defaults');
         end
+        % Keys that live either side of the gating block in both files, so a
+        % botched conflict resolution here surfaces as a test failure.
+        verifyTrue(tc, isfield(site.weather, 'wx_soil_vwc_cols'), f{1});
+        verifyTrue(tc, isfield(site.weather, 'wx_soil_rod_cm'), f{1});
+        verifyTrue(tc, isfield(site.weather, 'wx_soil_surface_rod_cm'), f{1});
+        verifyTrue(tc, isfield(site, 'gating'), f{1});
+        if strcmp(f{1}, 'site_config_CSSL.json')
+            verifyTrue(tc, isfield(site.weather, 'wx_tz'), 'CSSL keeps wx_tz');
+        end
     end
 end
 
