@@ -1,6 +1,7 @@
 function compute_rfi_spectrum(cfg)
 % Aggregate season-wide RFI spectra and propose frequency-domain excision bands.
 % Produces separate products for Signal, NL (noise+load), and L (load-only).
+% Adapts to CSSL RFI pulses if present, to only calculate RFI for quiet data.
 %
 % Per-bin diagnostics are mean PSD (dB), occupancy above the movmedian envelope,
 % spectral kurtosis SK=(M+1)/(M-1)*(M*S2/S1^2-1), and ch0xch1 coherence
@@ -22,10 +23,21 @@ function compute_rfi_spectrum(cfg)
     % --- Parameters (defaults; override via cfg) ---
     % Aggregation:
     ap.seg_len   = getdef(cfg, 'rfi_seg_len',      2^16);   % ~305 Hz bins at 20 MS/s
-    ap.n_read    = getdef(cfg, 'rfi_read_samples', 16*ap.seg_len);
     ap.excess_db = getdef(cfg, 'rfi_excess_db',    6);      % per-capture occupancy excess (diag)
     ap.max_caps  = getdef(cfg, 'rfi_max_captures', 500);    % even season subsample
     ap.base_khz  = getdef(cfg, 'rfi_env_khz', 1000);        % occupancy baseline width = the shared PSD-envelope width (cfg.rfi_env_khz)
+    % Gating:
+    ap.toggle    = getdef(cfg, 'toggle');
+    ap.mode      = getdef(cfg, 'mode');
+    ap.window_ms = getdef(cfg, 'window_ms');
+    ap.transition_ms  = getdef(cfg, 'transition_ms');
+    % If gating is enabled, scale up the samples read per file to ensure that
+    % after masking RFI bursts, there are still adequate segments to average.
+    if ap.toggle
+        ap.n_read = getdef(cfg, 'rfi_read_samples', 128 * ap.seg_len);
+    else
+        ap.n_read = getdef(cfg, 'rfi_read_samples', 16 * ap.seg_len);
+    end
     % Band-finder (shared with the viewer's interactive explorer; see rfi_propose_bands):
     bp.excess_db      = ap.excess_db;                           % PSD-excess-above-envelope (dB)
     bp.sk_threshold   = getdef(cfg, 'rfi_sk_threshold',   100); % also flag SK >= this
@@ -103,8 +115,16 @@ function aggregate_dataset(ds, bp, ap)
     % real stat (7) plus complex X01 (2x), e.g. seg_len=2^16 (nbins) and
     % chunk_sz=64 is ~0.3 GB — vs ~2.3 GB to hold all rfi_max_captures (500)
     % captures at once.
+    % Adapts to account for CSSL RFI pulse gating if needed.
     files = ch0_files;  bnames = bases;
     n_read = ap.n_read;  excess_db = bp.excess_db;  base_khz = ap.base_khz;  df = ap.df;
+    gate_cfg = struct(...
+        'enable', ap.toggle, ...
+        'mode', ap.mode, ...
+        'window_ms', ap.window_ms, ...
+        'transition_ms', ap.transition_ms, ...
+        'fs', ap.fs...
+        );
     chunk_sz = min(nC, 64);
     for c0 = 1:chunk_sz:nC
         cidx = c0:min(c0 + chunk_sz - 1, nC);
@@ -117,7 +137,7 @@ function aggregate_dataset(ds, bp, ap)
         parfor j = 1:mC
             k = cidx(j);
             [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture( ...
-                files(k), bnames(k), n_read, L, w, excess_db, base_khz, df); %#ok<PFBNS>
+                files(k), bnames(k), n_read, L, w, excess_db, base_khz, df, gate_cfg); %#ok<PFBNS>
             a0c(:,j) = a0;  a1c(:,j) = a1;
             q0c(:,j) = q0;  q1c(:,j) = q1;
             x01c(:,j) = x01;
@@ -136,6 +156,12 @@ function aggregate_dataset(ds, bp, ap)
         return;
     end
     fprintf('[rfi:%s] Aggregated %d capture(s), %d segment(s).\n', ds.name, Ncap, Mtot);
+    % Warn if total segments are insufficient down the line (relevant for
+    % CSSL RFI gating)
+    if Mtot < 16
+        warning('RFI:LowSegmentCount', ...
+            'Total aggregated segments (%d) is very low. Noise variance may cause false RFI band proposals.', Mtot);
+    end
 
     % --- Derived spectra (fftshifted; RF frequency axis) ---
     f_bb   = ((-L/2):(L/2-1))' * df;
@@ -214,9 +240,10 @@ end
 
 
 % =========================================================================
-function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, excess_db, base_khz, df)
+function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, excess_db, base_khz, df, gate_cfg)
 % Per-capture spectral accumulation (fftshifted bin order). Returns zeros and
 % ms=0 if the pair is missing/short so it contributes nothing to the season sums.
+% Adapts to account for CSSL RFI pulse gating if needed.
     a0=zeros(L,1); a1=zeros(L,1); q0=zeros(L,1); q1=zeros(L,1);
     x01=complex(zeros(L,1)); o0=zeros(L,1); o1=zeros(L,1); ms=0;
 
@@ -227,19 +254,42 @@ function [a0,a1,q0,q1,x01,o0,o1,ms] = one_capture(f_ch0, base, n_read, L, w, exc
     ch0 = M.read_channel(p0, n_read);
     ch1 = M.read_channel(p1, n_read);
     n   = min(numel(ch0), numel(ch1));
+    if n < L, return; end
+    ch0 = ch0(1:n);  ch1 = ch1(1:n);
+
+    % Gating mask eval (CSSL RFI)
+    is_calib = contains(string(base), {'_L_', '_NL_', '_Load_'}, 'IgnoreCase', true);
+    if gate_cfg.enable && ~is_calib
+        [quiet_mask, loud_mask] = get_gating_masks(ch0, gate_cfg.fs, gate_cfg.window_ms, gate_cfg.transition_ms);
+        if strcmpi(gate_cfg.mode, 'loud')
+            active_mask = loud_mask;
+        else
+            active_mask = quiet_mask;
+        end
+    else
+        active_mask = true(size(ch0));
+    end
     nseg = floor(n / L);
-    if nseg < 1, return; end
+    m_accum = 0;
 
     for s = 1:nseg
         i1 = (s-1)*L + 1;  i2 = s*L;
-        X0 = fftshift(fft(ch0(i1:i2) .* w));
-        X1 = fftshift(fft(ch1(i1:i2) .* w));
-        p0s = abs(X0).^2;  p1s = abs(X1).^2;
-        a0 = a0 + p0s;     a1 = a1 + p1s;
-        q0 = q0 + p0s.^2;  q1 = q1 + p1s.^2;
-        x01 = x01 + X0 .* conj(X1);
+        % Only accumulate if 100% of the segment is active (quiet) (CSSL RFI)
+        if all(active_mask(i1:i2))
+            X0 = fftshift(fft(ch0(i1:i2) .* w));
+            X1 = fftshift(fft(ch1(i1:i2) .* w));
+            p0s = abs(X0).^2;  p1s = abs(X1).^2;
+            a0 = a0 + p0s;     a1 = a1 + p1s;
+            q0 = q0 + p0s.^2;  q1 = q1 + p1s.^2;
+            x01 = x01 + X0 .* conj(X1);
+            m_accum = m_accum + 1;
+        end
     end
-    ms = nseg;
+
+    if m_accum < 1
+        return;
+    end
+    ms = m_accum;
 
     % Per-capture occupancy: this capture's mean PSD vs its movmedian baseline
     % (same cfg.rfi_env_khz width as every other PSD envelope, via rfi_env_window).

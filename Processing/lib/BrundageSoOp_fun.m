@@ -368,7 +368,7 @@ function dt = parse_mixed_datetime(s)
 % NaT), so each row is classified by its format first and parsed with its own
 % format. Unmatched/blank rows stay NaT (Locale pinned to en_US so the month
 % abbreviations Jan..Dec always match regardless of the system locale).
-    s  = string(s);
+    s  = cellstr(s);
     dt = NaT(size(s));
     dt.Format = 'yyyy-MM-dd HH:mm:ss';
 

@@ -2,10 +2,10 @@
   "about": "CSSL deployment starter. Rename to site_config.json so the pipeline picks it up (keep the Brundage copy under another name). Fields set to null are site-specific and MUST be filled in before processing; field rationale in docs/config-reference.md and README.md 'Deploying at a new site'.",
   "site": {
     "name": "CSSL",
-    "lat": null,
-    "lon": null,
-    "alt_m": null,
-    "tower_h_m": null,
+    "lat": 39.3255976,
+    "lon": -120.3678802,
+    "alt_m": 2107.387,
+    "tower_h_m": 6.096,
     "capture_tz": "UTC",
     "ant_gain_direct_dbi": 4.1,
     "ant_gain_reflected_dbi": 4.1,
@@ -20,22 +20,22 @@
     "freq_hz": 370e6,
     "Ti": 0.9,
     "num_segs": 2,
-    "peak_lag": null,
+    "peak_lag": -0.575,
     "lag_half_win": 2500,
-    "T_load_K": null
+    "T_load_K": 303
   },
   "season": {
-    "start": null,
-    "end": null,
-    "norad": null,
-    "candidate_norads": null
+    "start": "2025-11-21",
+    "end": "2025-11-25",
+    "norad": 38093,
+    "candidate_norads": [38093, 41622]
   },
   "paths": {
     "hpc": {
-      "data_dir": null,
-      "input_dir": null,
-      "out_dir": null,
-      "matlab_jobs": null
+      "data_dir": "/global/scratch/users/mgirotto/Pband_data/DataPBand/",
+      "input_dir": "/global/scratch/users/mgirotto/Pband_data/PostProcess/Static",
+      "out_dir": "/global/scratch/users/mgirotto/Pband_data/PostProcess/Output",
+      "matlab_jobs": "/global/scratch/users/mgirotto/Pband_data/PostProcess/matlab_jobs"
     },
     "local": {
       "data_dir": null,
@@ -56,5 +56,11 @@
     "wx_soil_rod_cm": null,
     "wx_soil_surface_rod_cm": null,
     "wx_tz": null
+  },
+  "gating": {
+    "toggle": false,
+    "mode": "quiet",
+    "window_ms": 0.5,
+    "transition_ms": 2.0
   }
 }

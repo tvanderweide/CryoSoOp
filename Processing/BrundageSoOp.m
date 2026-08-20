@@ -44,6 +44,12 @@ cfg.freq_hz      = site.sdr.freq_hz;       % center frequency (Hz)
 cfg.tower_h_m    = site.site.tower_h_m;    % tower height (m)
 cfg.T_load_K     = site.sdr.T_load_K;      % calibration load temperature (K)
 
+% Gating settings defined in site_config.json, see docs/config-reference.md.
+cfg.toggle        = site.gating.toggle;         % if gating for CSSL RFI should occur
+cfg.mode          = site.gating.mode;           % type of data to save
+cfg.window_ms     = site.gating.window_ms;      % length of rolling window (ms)
+cfg.transition_ms = site.gating.transition_ms;  % length of transition band (ms)
+
 % --- L2 geometric correction (site geometry from site_config.json) ---
 % capture_tz is the time zone used in capture filename timestamps.
 % Site geometry and time-zone details: docs/config-reference.md.

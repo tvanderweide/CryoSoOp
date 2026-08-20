@@ -582,6 +582,7 @@ function update_info(V, info)
     if startsWith(info.name, 'Radar Cal:')
         lines(end+1) = "Sigma0 CSV: " + src_desc(S.SIG0);
     end
+    lines(ismissing(lines)) = "";
     S.lbl_settings.Value = char(join(lines, newline));
     S.lbl_expl.Value     = info.expl;
 

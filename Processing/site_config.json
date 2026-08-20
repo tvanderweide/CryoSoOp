@@ -55,5 +55,11 @@
     "wx_soil_vwc_cols": "SoilVUE_VWC_%dcm_Avg",
     "wx_soil_rod_cm": [60, 75, 100],
     "wx_soil_surface_rod_cm": 55
+  },
+  "gating": {
+    "toggle": false,
+    "mode": "quiet",
+    "window_ms": 0.5,
+    "transition_ms": 2.0
   }
 }
