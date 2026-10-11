@@ -359,15 +359,17 @@ function [rows, rej] = process_pair(f_ch0, base_name, sid, cfg, win, npts, overf
     ch0 = read_channel(ch0_path, n_want);
     ch1 = read_channel(ch1_path, n_want);
 
-    % Time-domain gating of pulsed CSSL RFI. The mask comes from ch0 and is
-    % applied to BOTH channels so the pair stays sample-aligned; masked-out
-    % samples are ZEROED rather than removed, which scales the segment powers
+    % Time-domain gating of pulsed CSSL RFI. The mask is built from and applied
+    % to both channels so the pair stays sample-aligned; masked-out samples
+    % are ZEROED rather than removed, which scales the segment powers
     % (pow_ch0_fd / pow_ch1_fd) by the surviving duty cycle. cfg.gating_mode is
     % validated at config load, so 'loud' vs 'quiet' is the only choice here.
     if isfield(cfg, 'gating_toggle') && cfg.gating_toggle
-        [quiet_mask, loud_mask] = get_gating_masks(ch0, cfg.fs, ...
-                                                   cfg.gating_window_ms, ...
-                                                   cfg.gating_transition_ms);
+        [quiet_mask, loud_mask] = get_gating_masks( ...
+            ch0, ch1, cfg.fs,...
+            cfg.gating_margin_ms, ...
+            cfg.gating_period_ms, ...
+            cfg.gating_width_ms);
         if strcmpi(cfg.gating_mode, 'loud')
             active_mask = loud_mask;
         else

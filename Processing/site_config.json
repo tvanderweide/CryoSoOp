@@ -59,7 +59,8 @@
   "gating": {
     "toggle": false,
     "mode": "quiet",
-    "window_ms": 0.5,
-    "transition_ms": 2.0
+    "margin_ms": 2.0,
+    "period_ms": 99.98,
+    "width_ms": 50.825,
   }
 }

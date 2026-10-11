@@ -11,22 +11,23 @@ function cfg = gating_apply_config(cfg, site)
 % leaves every cfg.gating_* field UNSET, so each consumer's
 % isfield(cfg, 'gating_toggle') test runs ungated. jsondecode maps JSON null to
 % [], which the ~isempty terms treat as "not specified".
-    names = {'gating_toggle', 'gating_mode', 'gating_window_ms', 'gating_transition_ms'};
+    names = {'gating_toggle', 'gating_mode', 'gating_period_ms', ...
+                 'gating_width_ms', 'gating_margin_ms'};
     stale = names(isfield(cfg, names));
     if ~isempty(stale)
         cfg = rmfield(cfg, stale);
     end
-
     if ~(isfield(site, 'gating') && ~isempty(site.gating) && ...
          isfield(site.gating, 'toggle') && isequal(site.gating.toggle, true))
         return;
     end
 
-    cfg.gating_toggle        = true;
-    cfg.gating_mode          = 'quiet';  % 'quiet' keeps MUOS, 'loud' keeps RFI
-    cfg.gating_window_ms     = 0.5;      % rolling-power window (ms)
-    cfg.gating_transition_ms = 2.0;      % blanked each side of a transition (ms)
-    opt = {'mode', 'window_ms', 'transition_ms'};
+    cfg.gating_toggle           = true;
+    cfg.gating_mode             = 'quiet';                         % 'quiet' keeps MUOS, 'loud' keeps RFI
+    cfg.gating_period_ms        = 99.98;                           % Experimental RFI repetition period (ms)
+    cfg.gating_width_ms         = 50.825;                          % Experimental RFI pulse duration (ms)
+    cfg.gating_margin_ms        = 2.0;                             % Guard margin on each side (ms)
+    opt = {'mode', 'period_ms', 'width_ms', 'margin_ms'};
     for k = 1:numel(opt)
         if isfield(site.gating, opt{k}) && ~isempty(site.gating.(opt{k}))
             cfg.(['gating_' opt{k}]) = site.gating.(opt{k});
